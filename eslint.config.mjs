@@ -3,6 +3,8 @@ import tseslint from 'typescript-eslint';
 import stylistic from '@stylistic/eslint-plugin'
 
 export default tseslint.config({
+	ignores: ['src/bld/**'],
+}, {
 	plugins: {
 		'@stylistic': stylistic
 	},
@@ -17,7 +19,20 @@ export default tseslint.config({
 		"@stylistic/no-tabs": ["error", { allowIndentationTabs: true }],
 		"@stylistic/quotes": ["error", "single"],
 		"@stylistic/semi": ["error", "never"],
+		'@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
 		"no-lone-blocks": 0,
+	},
+}, {
+	files: ['src/core-interfaces.ts'],
+	rules: {
+		'@typescript-eslint/no-explicit-any': 'off',
+	},
+}, {
+	files: ['types/**/*.d.ts'],
+	rules: {
+		'@typescript-eslint/no-duplicate-enum-values': 'off',
+		'@typescript-eslint/no-explicit-any': 'off',
+		'@typescript-eslint/no-unsafe-function-type': 'off',
 	},
 });
 

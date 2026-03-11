@@ -22,8 +22,10 @@
 	"types": "types",
 	"scripts": {
 		"build": "rollup -c --bundleConfigAsCjs",
+		"lint": "eslint src types",
 		"start": "gulp",
 		"ship": "gulp ship",
+		"test": "node --test",
 		"defs": "gulp reactTestDefs",
 		"watch": "rollup -cw"
 	},
