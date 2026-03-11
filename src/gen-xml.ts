@@ -12,11 +12,12 @@ import {
   DEF_TEXT_SHADOW,
   EMU,
   LAYOUT_IDX_SERIES_BASE,
-  PLACEHOLDER_TYPES,
+  PLACEHOLDER_TYPE,
   SLDNUMFLDID,
   SLIDE_OBJECT_TYPES,
 } from "./core-enums.ts";
 import {
+  BorderTuple,
   IPresentationProps,
   ISlideObject,
   ISlideRel,
@@ -43,6 +44,48 @@ import {
   valToPts,
 } from "./gen-utils.ts";
 import { genXmlSlideTransition } from "./gen-transition.ts";
+
+const TABLE_CELL_INHERIT_KEYS = [
+  "align",
+  "bold",
+  "border",
+  "color",
+  "fill",
+  "fontFace",
+  "fontSize",
+  "margin",
+  "textDirection",
+  "underline",
+  "valign",
+] as const satisfies ReadonlyArray<keyof TableCellProps>;
+
+function inheritTableCellOption<
+  K extends (typeof TABLE_CELL_INHERIT_KEYS)[number],
+>(
+  cellOpts: TableCellProps,
+  source: ObjectOptions,
+  key: K,
+): void {
+  if (source[key] && !cellOpts[key] && cellOpts[key] !== 0) {
+    cellOpts[key] = source[key] as TableCellProps[K];
+  }
+}
+
+function inheritTextOption<K extends keyof TextPropsOptions>(
+  target: TextPropsOptions,
+  source: TextPropsOptions,
+  key: K,
+): void {
+  if (key !== "bullet" && !target[key]) {
+    target[key] = source[key];
+  }
+}
+
+function getPlaceholderXmlType(
+  placeholderType?: PLACEHOLDER_TYPE,
+): PLACEHOLDER_TYPE | null {
+  return placeholderType || null;
+}
 
 const ImageSizingXml = {
   cover: function (
@@ -374,8 +417,15 @@ function slideObjectToXml(slide: PresSlide | SlideLayout): string {
               vMerge: cell._vmerge ? 1 : undefined,
               hMerge: cell._hmerge ? 1 : undefined,
             };
-            let cellSpanAttrStr = Object.keys(cellSpanAttrs)
-              .map((k) => [k, cellSpanAttrs[k]])
+            const cellSpanEntries: Array<
+              [keyof typeof cellSpanAttrs, number | undefined]
+            > = [
+              ["rowSpan", cellSpanAttrs.rowSpan],
+              ["gridSpan", cellSpanAttrs.gridSpan],
+              ["vMerge", cellSpanAttrs.vMerge],
+              ["hMerge", cellSpanAttrs.hMerge],
+            ];
+            let cellSpanAttrStr = cellSpanEntries
               .filter(([, v]) => !!v)
               .map(([k, v]) => `${String(k)}="${String(v)}"`)
               .join(" ");
@@ -391,22 +441,8 @@ function slideObjectToXml(slide: PresSlide | SlideLayout): string {
             const cellOpts = cell.options || {};
             cell.options = cellOpts; // B: Inherit some options from table when cell options dont exist
             // @see: http://officeopenxml.com/drwTableCellProperties-alignment.php
-            [
-              "align",
-              "bold",
-              "border",
-              "color",
-              "fill",
-              "fontFace",
-              "fontSize",
-              "margin",
-              "textDirection",
-              "underline",
-              "valign",
-            ].forEach((name) => {
-              if (objTabOpts[name] && !cellOpts[name] && cellOpts[name] !== 0) {
-                cellOpts[name] = objTabOpts[name];
-              }
+            TABLE_CELL_INHERIT_KEYS.forEach((name) => {
+              inheritTableCellOption(cellOpts, objTabOpts, name);
             });
 
             const cellValign = cellOpts.valign
@@ -471,6 +507,7 @@ function slideObjectToXml(slide: PresSlide | SlideLayout): string {
 
             // 5: Borders: Add any borders
             if (cellOpts.border && Array.isArray(cellOpts.border)) {
+              const borderTuple = cellOpts.border as BorderTuple;
               // NOTE: *** IMPORTANT! *** LRTB order matters! (Reorder a line below to watch the borders go wonky in MS-PPT-2013!!)
               [
                 { idx: 3, name: "lnL" },
@@ -478,17 +515,16 @@ function slideObjectToXml(slide: PresSlide | SlideLayout): string {
                 { idx: 0, name: "lnT" },
                 { idx: 2, name: "lnB" },
               ].forEach((obj) => {
-                if (cellOpts.border[obj.idx].type !== "none") {
+                const border = borderTuple[obj.idx];
+                if (border.type !== "none") {
                   strXml += `<a:${obj.name} w="${
-                    valToPts(cellOpts.border[obj.idx].pt)
+                    valToPts(border.pt)
                   }" cap="flat" cmpd="sng" algn="ctr">`;
                   strXml += `<a:solidFill>${
-                    createColorElement(cellOpts.border[obj.idx].color)
+                    createColorElement(border.color)
                   }</a:solidFill>`;
                   strXml += `<a:prstDash val="${
-                    cellOpts.border[obj.idx].type === "dash"
-                      ? "sysDash"
-                      : "solid"
+                    border.type === "dash" ? "sysDash" : "solid"
                   }"/><a:round/><a:headEnd type="none" w="med" len="med"/><a:tailEnd type="none" w="med" len="med"/>`;
                   strXml += `</a:${obj.name}>`;
                 } else {
@@ -1879,14 +1915,12 @@ export function genXmlTextBody(slideObj: ISlideObject | TableCell): string {
       // NOTE: We only pass the text.options to genXmlTextRun (not the Slide.options),
       // so the run building function cant just fallback to Slide.color, therefore, we need to do that here before passing options below.
       // FILTER RULE: Hyperlinks should not inherit `color` from main options (let PPT default to local color, eg: blue on MacOS)
-      Object.entries(opts).filter(([key]) =>
+      (Object.keys(opts) as Array<keyof TextPropsOptions>).filter((key) =>
         !(textObj.options.hyperlink && key === "color")
-      ).forEach(([key, val]) => {
+      ).forEach((key) => {
         // if (textObj.options.hyperlink && key === 'color') null
         // NOTE: This loop will pick up unecessary keys (`x`, etc.), but it doesnt hurt anything
-        if (key !== "bullet" && !textObj.options[key]) {
-          textObj.options[key] = val;
-        }
+        inheritTextOption(textObj.options, opts, key);
       });
 
       // D: Add formatted textrun
@@ -1967,18 +2001,11 @@ export function genXmlPlaceholder(placeholderObj: ISlideObject): string {
   const placeholderTyp = placeholderObj.options?._placeholderType
     ? placeholderObj.options._placeholderType
     : "";
-  const placeholderType: string =
-    placeholderTyp && PLACEHOLDER_TYPES[placeholderTyp]
-      ? PLACEHOLDER_TYPES[placeholderTyp].toString()
-      : "";
+  const placeholderType = getPlaceholderXmlType(placeholderTyp || undefined);
 
   return `<p:ph
 		${placeholderIdx ? ' idx="' + placeholderIdx.toString() + '"' : ""}
-		${
-    placeholderType && PLACEHOLDER_TYPES[placeholderType]
-      ? ` type="${placeholderType}"`
-      : ""
-  }
+		${placeholderType ? ` type="${placeholderType}"` : ""}
 		${
     placeholderObj.text && placeholderObj.text.length > 0
       ? ' hasCustomPrompt="1"'
