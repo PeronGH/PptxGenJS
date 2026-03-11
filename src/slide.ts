@@ -2,7 +2,7 @@
  * PptxGenJS: Slide Class
  */
 
-import { CHART_NAME, SHAPE_NAME } from "./core-enums.ts";
+import { CHART_NAME, DEF_FONT_COLOR, SHAPE_NAME } from "./core-enums.ts";
 import {
   AddSlideProps,
   BackgroundProps,
@@ -45,9 +45,9 @@ export default class Slide {
   public _slideId: number;
   public _slideLayout: SlideLayout;
   public _slideNum: number;
-  public _slideNumberProps: SlideNumberProps;
+  public _slideNumberProps?: SlideNumberProps;
   public _slideObjects: ISlideObject[];
-  public _newAutoPagedSlides: PresSlide[];
+  public _newAutoPagedSlides: PresSlide[] = [];
 
   constructor(params: {
     addSlide: (options?: AddSlideProps) => PresSlide;
@@ -57,7 +57,7 @@ export default class Slide {
     slideId: number;
     slideRId: number;
     slideNumber: number;
-    slideLayout?: SlideLayout;
+    slideLayout: SlideLayout;
   }) {
     this.addSlide = params.addSlide;
     this.getSlide = params.getSlide;
@@ -69,16 +69,14 @@ export default class Slide {
     this._relsMedia = [];
     this._setSlideNum = params.setSlideNum;
     this._slideId = params.slideId;
-    this._slideLayout = params.slideLayout || null;
+    this._slideLayout = params.slideLayout;
     this._slideNum = params.slideNumber;
     this._slideObjects = [];
     /** NOTE: Slide Numbers: In order for Slide Numbers to function they need to be in all 3 files: master/layout/slide
      * `defineSlideMaster` and `addNewSlide.slideNumber` will add {slideNumber} to `this.masterSlide` and `this.slideLayouts`
      * so, lastly, add to the Slide now.
      */
-    this._slideNumberProps = this._slideLayout?._slideNumberProps
-      ? this._slideLayout._slideNumberProps
-      : null;
+    this._slideNumberProps = this._slideLayout._slideNumberProps;
   }
 
   /**
@@ -86,7 +84,7 @@ export default class Slide {
    * @type {string|BackgroundProps}
    * @deprecated in v3.3.0 - use `background` instead
    */
-  private _bkgd: string | BackgroundProps;
+  private _bkgd?: string | BackgroundProps;
   public set bkgd(value: string | BackgroundProps) {
     this._bkgd = value;
     if (!this._background || !this._background.color) {
@@ -95,7 +93,7 @@ export default class Slide {
     }
   }
 
-  public get bkgd(): string | BackgroundProps {
+  public get bkgd(): string | BackgroundProps | undefined {
     return this._bkgd;
   }
 
@@ -108,7 +106,7 @@ export default class Slide {
    * @example url `background: { path:'https://some.url/image.jpg'}`
    * @since v3.3.0
    */
-  private _background: BackgroundProps;
+  private _background: BackgroundProps = {};
   public set background(props: BackgroundProps) {
     this._background = props;
     // Add background (image data/path must be captured before `exportPresentation()` is called)
@@ -123,7 +121,7 @@ export default class Slide {
    * Default font color
    * @type {HexColor}
    */
-  private _color: HexColor;
+  private _color: HexColor = DEF_FONT_COLOR;
   public set color(value: HexColor) {
     this._color = value;
   }
@@ -135,7 +133,7 @@ export default class Slide {
   /**
    * @type {boolean}
    */
-  private _hidden: boolean;
+  private _hidden = false;
   public set hidden(value: boolean) {
     this._hidden = value;
   }
@@ -190,7 +188,7 @@ export default class Slide {
     // Set `_type` on IChartOptsLib as its what is used as object is passed around
     const optionsWithType: IChartOptsLib = options || {};
     optionsWithType._type = type;
-    genObj.addChartDefinition(this, type, data, options);
+    genObj.addChartDefinition(this, type, data, optionsWithType);
     return this;
   }
 
@@ -237,7 +235,7 @@ export default class Slide {
     // <script./> => `pptx.shapes.RECTANGLE` [string] "rect" ... shapeName['name'] = 'rect'
     // TypeScript => `pptxgen.shapes.RECTANGLE` [string] "rect" ... shapeName = 'rect'
     // let shapeNameDecode = typeof shapeName === 'object' && shapeName['name'] ? shapeName['name'] : shapeName
-    genObj.addShapeDefinition(this, shapeName, options);
+    genObj.addShapeDefinition(this, shapeName, options || {});
     return this;
   }
 
@@ -252,7 +250,7 @@ export default class Slide {
     this._newAutoPagedSlides = genObj.addTableDefinition(
       this,
       tableRows,
-      options,
+      options || {},
       this._slideLayout,
       this._presLayout,
       this.addSlide,
@@ -271,7 +269,7 @@ export default class Slide {
     const textParam = typeof text === "string" || typeof text === "number"
       ? [{ text, options }]
       : text;
-    genObj.addTextDefinition(this, textParam, options, false);
+    genObj.addTextDefinition(this, textParam, options || {}, false);
     return this;
   }
 }

@@ -96,6 +96,16 @@ import * as genXml from "./gen-xml.ts";
 
 const VERSION = "4.0.1";
 
+function createUnsupportedMasterSlideMethod(name: string): never {
+  throw new Error(`Master slide does not support "${name}"`);
+}
+
+function requireFolder(zip: JSZip, path: string): JSZip {
+  const folder = zip.folder(path);
+  if (!folder) throw new Error(`Unable to create zip folder: ${path}`);
+  return folder;
+}
+
 export default class PptxGenJS implements IPresentationProps {
   // Property getters/setters
 
@@ -111,7 +121,7 @@ export default class PptxGenJS implements IPresentationProps {
    * @type {string}
    * @see https://support.office.com/en-us/article/Change-the-size-of-your-slides-040a811c-be43-40b9-8d04-0de5ed79987e
    */
-  private _layout: string;
+  private _layout!: string;
   public set layout(value: string) {
     const newLayout: PresLayout = this.LAYOUTS[value];
 
@@ -187,7 +197,7 @@ export default class PptxGenJS implements IPresentationProps {
   /**
    * @type {ThemeProps}
    */
-  private _theme: ThemeProps;
+  private _theme!: ThemeProps;
   public set theme(value: ThemeProps) {
     this._theme = value;
   }
@@ -355,33 +365,30 @@ export default class PptxGenJS implements IPresentationProps {
         _rels: [],
         _relsChart: [],
         _relsMedia: [],
-        _slide: null,
         _slideNum: 1000,
-        _slideNumberProps: null,
         _slideObjects: [],
       },
     ];
     this._slides = [];
     this._sections = [];
     this._masterSlide = {
-      addChart: null,
-      addImage: null,
-      addMedia: null,
-      addNotes: null,
-      addShape: null,
-      addTable: null,
-      addText: null,
+      addChart: () => createUnsupportedMasterSlideMethod("addChart"),
+      addImage: () => createUnsupportedMasterSlideMethod("addImage"),
+      addMedia: () => createUnsupportedMasterSlideMethod("addMedia"),
+      addNotes: () => createUnsupportedMasterSlideMethod("addNotes"),
+      addShape: () => createUnsupportedMasterSlideMethod("addShape"),
+      addTable: () => createUnsupportedMasterSlideMethod("addTable"),
+      addText: () => createUnsupportedMasterSlideMethod("addText"),
       //
-      _name: null,
+      _name: "Master Slide",
       _presLayout: this._presLayout,
-      _rId: null,
+      _rId: 0,
       _rels: [],
       _relsChart: [],
       _relsMedia: [],
-      _slideId: null,
-      _slideLayout: null,
-      _slideNum: null,
-      _slideNumberProps: null,
+      _slideId: 0,
+      _slideLayout: this._slideLayouts[0],
+      _slideNum: 0,
       _slideObjects: [],
     };
   }
@@ -398,11 +405,12 @@ export default class PptxGenJS implements IPresentationProps {
           slide._slideNum === this.slides[this.slides.length - 1]._slideNum
         ).length > 0;
 
-    options.sectionTitle = sectAlreadyInUse
+    const slideOptions = options ? { ...options } : {};
+    slideOptions.sectionTitle = sectAlreadyInUse
       ? this.sections[this.sections.length - 1].title
-      : null;
+      : undefined;
 
-    return this.addSlide(options);
+    return this.addSlide(slideOptions);
   };
 
   /**
@@ -499,16 +507,16 @@ export default class PptxGenJS implements IPresentationProps {
       // B: Add all required folders and files
       zip.folder("_rels");
       zip.folder("docProps");
-      zip.folder("ppt").folder("_rels");
-      zip.folder("ppt/charts").folder("_rels");
+      requireFolder(zip, "ppt").folder("_rels");
+      requireFolder(zip, "ppt/charts").folder("_rels");
       zip.folder("ppt/embeddings");
       zip.folder("ppt/media");
-      zip.folder("ppt/slideLayouts").folder("_rels");
-      zip.folder("ppt/slideMasters").folder("_rels");
-      zip.folder("ppt/slides").folder("_rels");
+      requireFolder(zip, "ppt/slideLayouts").folder("_rels");
+      requireFolder(zip, "ppt/slideMasters").folder("_rels");
+      requireFolder(zip, "ppt/slides").folder("_rels");
       zip.folder("ppt/theme");
-      zip.folder("ppt/notesMasters").folder("_rels");
-      zip.folder("ppt/notesSlides").folder("_rels");
+      requireFolder(zip, "ppt/notesMasters").folder("_rels");
+      requireFolder(zip, "ppt/notesSlides").folder("_rels");
       zip.file(
         "[Content_Types].xml",
         genXml.makeXmlContTypes(
@@ -782,12 +790,11 @@ export default class PptxGenJS implements IPresentationProps {
       _rels: [],
       _relsChart: [],
       _relsMedia: [],
-      _slide: null,
       _slideNum: 1000 + this.slideLayouts.length + 1,
-      _slideNumberProps: propsClone.slideNumber || null,
+      _slideNumberProps: propsClone.slideNumber || undefined,
       _slideObjects: [],
-      background: propsClone.background || null,
-      bkgd: propsClone.bkgd || null,
+      background: propsClone.background || undefined,
+      bkgd: propsClone.bkgd || undefined,
     };
 
     // STEP 1: Create the Slide Master/Layout
