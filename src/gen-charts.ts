@@ -11,6 +11,7 @@ import {
   BARCHART_COLORS,
   CHART_NAME,
   CHART_TYPE,
+  DEF_CHART_BORDER,
   DEF_CHART_GRIDLINE,
   DEF_FONT_COLOR,
   DEF_FONT_SIZE,
@@ -37,6 +38,69 @@ import {
   valToPts,
 } from "./gen-utils.ts";
 import JSZip from "jszip";
+
+type ChartAxisTimeUnit = "days" | "months" | "years";
+
+const VALID_TIME_UNITS = new Set<ChartAxisTimeUnit>([
+  "days",
+  "months",
+  "years",
+]);
+const CAT_TIME_UNIT_KEYS = [
+  "catAxisBaseTimeUnit",
+  "catAxisMajorTimeUnit",
+  "catAxisMinorTimeUnit",
+] as const;
+const SER_TIME_UNIT_KEYS = [
+  "serAxisBaseTimeUnit",
+  "serAxisMajorTimeUnit",
+  "serAxisMinorTimeUnit",
+] as const;
+type ChartTimeUnitKey =
+  | typeof CAT_TIME_UNIT_KEYS[number]
+  | typeof SER_TIME_UNIT_KEYS[number];
+type ResolvedChartSeries = IOptsChartData & {
+  labels: string[][];
+  values: number[];
+  sizes: number[];
+};
+
+function normalizeTimeUnitOption<K extends ChartTimeUnitKey>(
+  opts: IChartOptsLib,
+  key: K,
+): void {
+  const value = opts[key];
+  if (!value) return;
+
+  const normalized = value.toLowerCase() as ChartAxisTimeUnit;
+  if (!VALID_TIME_UNITS.has(normalized)) {
+    console.warn(`"${key}" must be one of: 'days','months','years' !`);
+    delete opts[key];
+    return;
+  }
+
+  opts[key] = normalized as IChartOptsLib[K];
+}
+
+function resolveSeries(
+  series: IOptsChartData | undefined,
+  fallbackName: string,
+): ResolvedChartSeries {
+  return {
+    ...series,
+    name: series?.name || fallbackName,
+    labels: series?.labels || [[]],
+    values: series?.values || [],
+    sizes: series?.sizes || [],
+  };
+}
+
+function getSeriesColor(opts: IChartOptsLib, colorIndex: number): string {
+  const palette = opts.chartColors && opts.chartColors.length > 0
+    ? opts.chartColors
+    : BARCHART_COLORS;
+  return palette[colorIndex % palette.length] || DEF_FONT_COLOR;
+}
 
 /**
  * Based on passed data, creates Excel Worksheet that is used as a data source for a chart.
@@ -1012,8 +1076,9 @@ function makeChartType(
   // ....: Ensure each X/Y Axis/Col has same row height (esp. applicable to XY Scatter where X can often be larger than Y's)
   let colorIndex = -1; // Maintain the color index by region
   let idxColLtr = 1;
-  let optsChartData: IOptsChartData = null;
+  let optsChartData: ResolvedChartSeries | undefined;
   let strXml = "";
+  const firstSeries = resolveSeries(data[0], "Series 1");
 
   switch (chartType) {
     case CHART_TYPE.AREA:
@@ -1091,9 +1156,7 @@ function makeChartType(
         // Fill and Border
         // TODO: CURRENT: Pull#727
         // TODO: let seriesColor = obj.color ? obj.color : opts.chartColors ? opts.chartColors[colorIndex % opts.chartColors.length] : null
-        const seriesColor = opts.chartColors
-          ? opts.chartColors[colorIndex % opts.chartColors.length]
-          : null;
+        const seriesColor = getSeriesColor(opts, colorIndex);
 
         strXml += "  <c:spPr>";
         if (seriesColor === "transparent") {
@@ -1113,17 +1176,17 @@ function makeChartType(
           if (opts.lineSize === 0) {
             strXml += "<a:ln><a:noFill/></a:ln>";
           } else {
-            strXml += `<a:ln w="${valToPts(opts.lineSize)}" cap="${
+            strXml += `<a:ln w="${valToPts(opts.lineSize || 2)}" cap="${
               createLineCap(opts.lineCap)
             }"><a:solidFill>${createColorElement(seriesColor)}</a:solidFill>`;
             strXml += '<a:prstDash val="' + (opts.lineDash || "solid") +
               '"/><a:round/></a:ln>';
           }
         } else if (opts.dataBorder) {
-          strXml += `<a:ln w="${valToPts(opts.dataBorder.pt)}" cap="${
-            createLineCap(opts.lineCap)
-          }"><a:solidFill>${
-            createColorElement(opts.dataBorder.color)
+          strXml += `<a:ln w="${
+            valToPts(opts.dataBorder.pt || DEF_CHART_BORDER.pt)
+          }" cap="${createLineCap(opts.lineCap)}"><a:solidFill>${
+            createColorElement(opts.dataBorder.color || DEF_CHART_BORDER.color)
           }</a:solidFill><a:prstDash val="solid"/><a:round/></a:ln>`;
         }
 
@@ -1183,11 +1246,7 @@ function makeChartType(
           strXml += "  <c:spPr>";
           strXml += `    <a:solidFill>${
             createColorElement(
-              opts.chartColors[
-                obj._dataIndex + 1 > opts.chartColors.length
-                  ? Math.floor(Math.random() * opts.chartColors.length)
-                  : obj._dataIndex
-              ],
+              getSeriesColor(opts, obj._dataIndex || 0),
             )
           }</a:solidFill>`;
           strXml +=
@@ -1401,7 +1460,8 @@ function makeChartType(
 
       // 2: Series: (One for each Y-Axis)
       colorIndex = -1;
-      data.filter((_obj, idx) => idx > 0).forEach((obj, idx) => {
+      data.filter((_obj, idx) => idx > 0).forEach((series, idx) => {
+        const obj = resolveSeries(series, `Y-Value ${idx + 1}`);
         colorIndex++;
         strXml += "<c:ser>";
         strXml += `  <c:idx val="${idx}"/>`;
@@ -1417,8 +1477,7 @@ function makeChartType(
         // 'c:spPr': Fill, Border, Line, LineStyle (dash, etc.), Shadow
         strXml += "  <c:spPr>";
         {
-          const tmpSerColor =
-            opts.chartColors[colorIndex % opts.chartColors.length];
+          const tmpSerColor = getSeriesColor(opts, colorIndex);
 
           if (tmpSerColor === "transparent") {
             strXml += "<a:noFill/>";
@@ -1437,7 +1496,7 @@ function makeChartType(
           if (opts.lineSize === 0) {
             strXml += "<a:ln><a:noFill/></a:ln>";
           } else {
-            strXml += `<a:ln w="${valToPts(opts.lineSize)}" cap="${
+            strXml += `<a:ln w="${valToPts(opts.lineSize || 2)}" cap="${
               createLineCap(opts.lineCap)
             }"><a:solidFill>${createColorElement(tmpSerColor)}</a:solidFill>`;
             strXml += `<a:prstDash val="${
@@ -1461,18 +1520,14 @@ function makeChartType(
           strXml += "<c:spPr>";
           strXml += `<a:solidFill>${
             createColorElement(
-              opts.chartColors[
-                idx + 1 > opts.chartColors.length
-                  ? Math.floor(Math.random() * opts.chartColors.length)
-                  : idx
-              ],
+              getSeriesColor(opts, idx),
             )
           }</a:solidFill>`;
           strXml +=
             `<a:ln w="${opts.lineDataSymbolLineSize}" cap="flat"><a:solidFill>${
               createColorElement(
                 opts.lineDataSymbolLineColor ||
-                  opts.chartColors[colorIndex % opts.chartColors.length],
+                  getSeriesColor(opts, colorIndex),
               )
             }</a:solidFill><a:prstDash val="solid"/><a:round/></a:ln>`;
           strXml += "<a:effectLst/>";
@@ -1772,7 +1827,8 @@ function makeChartType(
 
       // 2: Series: (One for each Y-Axis)
       colorIndex = -1;
-      data.filter((_obj, idx) => idx > 0).forEach((obj, idx) => {
+      data.filter((_obj, idx) => idx > 0).forEach((series, idx) => {
+        const obj = resolveSeries(series, `Y-Values ${idx + 1}`);
         colorIndex++;
         strXml += "<c:ser>";
         strXml += `  <c:idx val="${idx}"/>`;
@@ -1792,8 +1848,7 @@ function makeChartType(
         {
           strXml += "<c:spPr>";
 
-          const tmpSerColor =
-            opts.chartColors[colorIndex % opts.chartColors.length];
+          const tmpSerColor = getSeriesColor(opts, colorIndex);
 
           if (tmpSerColor === "transparent") {
             strXml += "<a:noFill/>";
@@ -1814,13 +1869,15 @@ function makeChartType(
             strXml += "<a:ln><a:noFill/></a:ln>";
           } else if (opts.dataBorder) {
             strXml += `<a:ln w="${
-              valToPts(opts.dataBorder.pt)
+              valToPts(opts.dataBorder.pt || DEF_CHART_BORDER.pt)
             }" cap="flat"><a:solidFill>${
-              createColorElement(opts.dataBorder.color)
+              createColorElement(
+                opts.dataBorder.color || DEF_CHART_BORDER.color,
+              )
             }</a:solidFill><a:prstDash val="solid"/><a:round/></a:ln>`;
           } else {
             strXml += `<a:ln w="${
-              valToPts(opts.lineSize)
+              valToPts(opts.lineSize || 2)
             }" cap="flat"><a:solidFill>${
               createColorElement(tmpSerColor)
             }</a:solidFill>`;
@@ -1956,7 +2013,7 @@ function makeChartType(
     case CHART_TYPE.DOUGHNUT:
     case CHART_TYPE.PIE:
       // Use the same let name so code blocks from barChart are interchangeable
-      optsChartData = data[0];
+      optsChartData = firstSeries;
 
       /* EX:
 				data: [
@@ -2288,18 +2345,7 @@ function makeCatAxis(
     opts._type === CHART_TYPE.BUBBLE || opts._type === CHART_TYPE.BUBBLE3D
   ) {
     if (opts.catLabelFormatCode) {
-      ["catAxisBaseTimeUnit", "catAxisMajorTimeUnit", "catAxisMinorTimeUnit"]
-        .forEach((opt) => {
-          // Validate input as poorly chosen/garbage options will cause chart corruption and it wont render at all!
-          if (
-            opts[opt] &&
-            (typeof opts[opt] !== "string" ||
-              !["days", "months", "years"].includes(opts[opt].toLowerCase()))
-          ) {
-            console.warn(`"${opt}" must be one of: 'days','months','years' !`);
-            opts[opt] = null;
-          }
-        });
+      CAT_TIME_UNIT_KEYS.forEach((key) => normalizeTimeUnitOption(opts, key));
       if (opts.catAxisBaseTimeUnit) {
         strXml += '<c:baseTimeUnit val="' +
           opts.catAxisBaseTimeUnit.toLowerCase() + '"/>';
@@ -2554,18 +2600,7 @@ function makeSerAxis(
 
   // Issue#149: PPT will auto-adjust these as needed after calcing the date bounds, so we only include them when specified by user
   if (opts.serLabelFormatCode) {
-    ["serAxisBaseTimeUnit", "serAxisMajorTimeUnit", "serAxisMinorTimeUnit"]
-      .forEach((opt) => {
-        // Validate input as poorly chosen/garbage options will cause chart corruption and it wont render at all!
-        if (
-          opts[opt] &&
-          (typeof opts[opt] !== "string" ||
-            !["days", "months", "years"].includes(opt.toLowerCase()))
-        ) {
-          console.warn(`"${opt}" must be one of: 'days','months','years' !`);
-          opts[opt] = null;
-        }
-      });
+    SER_TIME_UNIT_KEYS.forEach((key) => normalizeTimeUnitOption(opts, key));
     if (opts.serAxisBaseTimeUnit) {
       strXml +=
         ` <c:baseTimeUnit  val="${opts.serAxisBaseTimeUnit.toLowerCase()}"/>`;
@@ -2694,7 +2729,10 @@ function getExcelColName(colIndex: number): string {
  * @example { type: 'outer', blur: 3, offset: (23000 / 12700), angle: 90, color: '000000', opacity: 0.35, rotateWithShape: true };
  * @return {string} XML
  */
-function createShadowElement(options: ShadowProps, defaults: object): string {
+function createShadowElement(
+  options: ShadowProps | undefined,
+  defaults: object,
+): string {
   if (!options) {
     return "<a:effectLst/>";
   } else if (typeof options !== "object") {
@@ -2746,7 +2784,7 @@ function createGridLineElement(glOpts: OptsChartGridLine): string {
   return strXml;
 }
 
-function createLineCap(lineCap: ChartLineCap): string {
+function createLineCap(lineCap?: ChartLineCap): string {
   if (!lineCap || lineCap === "flat") {
     return "flat";
   } else if (lineCap === "square") {
