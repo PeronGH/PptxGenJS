@@ -11,6 +11,8 @@ import {
   SLIDE_OBJECT_TYPES,
 } from "./core-enums.ts";
 import {
+  Margin,
+  MarginTuple,
   PresLayout,
   SlideLayout,
   TableCell,
@@ -19,6 +21,14 @@ import {
   TableToSlidesProps,
 } from "./core-interfaces.ts";
 import { getSmartParseNumber, inch2Emu, valToPts } from "./gen-utils.ts";
+
+function toMarginTuple(
+  margin: Margin | undefined,
+  fallback: MarginTuple,
+): MarginTuple {
+  if (margin === undefined) return fallback;
+  return Array.isArray(margin) ? margin : [margin, margin, margin, margin];
+}
 
 /**
  * Break cell text into lines based upon table column width (e.g.: Magic Happens Here(tm))
@@ -454,9 +464,10 @@ export function getSlidesForTableRows(
   // STEP 5: Calculate column widths if not provided (emuSlideTabW will be used below to determine lines-per-col)
   if (!tableProps.colW || !Array.isArray(tableProps.colW)) {
     if (tableProps.colW && !isNaN(Number(tableProps.colW))) {
-      const arrColW = [];
+      const arrColW: number[] = [];
+      const sharedColWidth = Number(tableProps.colW);
       const firstRow = tableRows[0] || [];
-      firstRow.forEach(() => arrColW.push(tableProps.colW));
+      firstRow.forEach(() => arrColW.push(sharedColWidth));
       tableProps.colW = [];
       arrColW.forEach((val) => {
         if (Array.isArray(tableProps.colW)) tableProps.colW.push(val);
@@ -487,44 +498,47 @@ export function getSlidesForTableRows(
         options: cell.options,
       });
 
+      const cellMargin = toMarginTuple(cell.options?.margin, [0, 0, 0, 0]);
+      const tableMargin = toMarginTuple(tableProps.margin, [0, 0, 0, 0]);
+
       /** FUTURE: DEPRECATED:
        * - Backwards-Compat: Oops! Discovered we were still using points for cell margin before v3.8.0 (UGH!)
        * - We cant introduce a breaking change before v4.0, so...
        */
-      if (cell.options.margin && cell.options.margin[0] >= 1) {
+      if (cellMargin[0] >= 1) {
         if (
-          cell.options?.margin && cell.options.margin[0] &&
-          valToPts(cell.options.margin[0]) > maxCellMarTopEmu
-        ) maxCellMarTopEmu = valToPts(cell.options.margin[0]);
+          cellMargin[0] &&
+          valToPts(cellMargin[0]) > maxCellMarTopEmu
+        ) maxCellMarTopEmu = valToPts(cellMargin[0]);
         else if (
-          tableProps?.margin && tableProps.margin[0] &&
-          valToPts(tableProps.margin[0]) > maxCellMarTopEmu
-        ) maxCellMarTopEmu = valToPts(tableProps.margin[0]);
+          tableMargin[0] &&
+          valToPts(tableMargin[0]) > maxCellMarTopEmu
+        ) maxCellMarTopEmu = valToPts(tableMargin[0]);
         if (
-          cell.options?.margin && cell.options.margin[2] &&
-          valToPts(cell.options.margin[2]) > maxCellMarBtmEmu
-        ) maxCellMarBtmEmu = valToPts(cell.options.margin[2]);
+          cellMargin[2] &&
+          valToPts(cellMargin[2]) > maxCellMarBtmEmu
+        ) maxCellMarBtmEmu = valToPts(cellMargin[2]);
         else if (
-          tableProps?.margin && tableProps.margin[2] &&
-          valToPts(tableProps.margin[2]) > maxCellMarBtmEmu
-        ) maxCellMarBtmEmu = valToPts(tableProps.margin[2]);
+          tableMargin[2] &&
+          valToPts(tableMargin[2]) > maxCellMarBtmEmu
+        ) maxCellMarBtmEmu = valToPts(tableMargin[2]);
       } else {
         if (
-          cell.options?.margin && cell.options.margin[0] &&
-          inch2Emu(cell.options.margin[0]) > maxCellMarTopEmu
-        ) maxCellMarTopEmu = inch2Emu(cell.options.margin[0]);
+          cellMargin[0] &&
+          inch2Emu(cellMargin[0]) > maxCellMarTopEmu
+        ) maxCellMarTopEmu = inch2Emu(cellMargin[0]);
         else if (
-          tableProps?.margin && tableProps.margin[0] &&
-          inch2Emu(tableProps.margin[0]) > maxCellMarTopEmu
-        ) maxCellMarTopEmu = inch2Emu(tableProps.margin[0]);
+          tableMargin[0] &&
+          inch2Emu(tableMargin[0]) > maxCellMarTopEmu
+        ) maxCellMarTopEmu = inch2Emu(tableMargin[0]);
         if (
-          cell.options?.margin && cell.options.margin[2] &&
-          inch2Emu(cell.options.margin[2]) > maxCellMarBtmEmu
-        ) maxCellMarBtmEmu = inch2Emu(cell.options.margin[2]);
+          cellMargin[2] &&
+          inch2Emu(cellMargin[2]) > maxCellMarBtmEmu
+        ) maxCellMarBtmEmu = inch2Emu(cellMargin[2]);
         else if (
-          tableProps?.margin && tableProps.margin[2] &&
-          inch2Emu(tableProps.margin[2]) > maxCellMarBtmEmu
-        ) maxCellMarBtmEmu = inch2Emu(tableProps.margin[2]);
+          tableMargin[2] &&
+          inch2Emu(tableMargin[2]) > maxCellMarBtmEmu
+        ) maxCellMarBtmEmu = inch2Emu(tableMargin[2]);
       }
     });
 
@@ -569,10 +583,11 @@ export function getSlidesForTableRows(
         : null;
 
       // E-3: **MAIN** Parse cell contents into lines based upon col width, font, etc
-      let totalColW = tableProps.colW[iCell];
-      if (cell.options.colspan && Array.isArray(tableProps.colW)) {
-        totalColW = tableProps.colW.filter((_cell, idx) =>
-          idx >= iCell && idx < idx + cell.options.colspan
+      const colWidths = Array.isArray(tableProps.colW) ? tableProps.colW : [];
+      let totalColW = colWidths[iCell];
+      if (cell.options.colspan && colWidths.length > 0) {
+        totalColW = colWidths.filter((_cell, idx) =>
+          idx >= iCell && idx < iCell + cell.options.colspan
         ).reduce((prev, curr) => prev + curr);
       }
 
