@@ -22,11 +22,13 @@ import {
 	ShapeProps,
 	SlideLayout,
 	SlideNumberProps,
+	SlideTransitionProps,
 	TableProps,
 	TableRow,
 	TextProps,
 	TextPropsOptions,
 } from './core-interfaces'
+import { normalizeSlideTransition } from './gen-transition'
 import * as genObj from './gen-objects'
 
 export default class Slide {
@@ -138,6 +140,19 @@ export default class Slide {
 
 	public get hidden(): boolean {
 		return this._hidden
+	}
+
+	/**
+	 * Slide transition options
+	 * @type {SlideTransitionProps}
+	 */
+	private _transition: SlideTransitionProps | undefined
+	public set transition(value: SlideTransitionProps | undefined) {
+		this._transition = normalizeSlideTransition(value)
+	}
+
+	public get transition(): SlideTransitionProps | undefined {
+		return this._transition
 	}
 
 	/**

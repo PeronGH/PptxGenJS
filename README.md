@@ -30,7 +30,7 @@ Design custom slides, charts, images, tables, and templates programmatically - n
 
 - Create all major slide objects: **text, tables, shapes, images, charts**, and more
 - Define custom **Slide Masters** for consistent academic or corporate branding
-- Supports **SVGs**, **animated GIFs**, **YouTube embeds**, **RTL text**, and **Asian fonts**
+- Supports **slide transitions**, **SVGs**, **animated GIFs**, **YouTube embeds**, **RTL text**, and **Asian fonts**
 
 ### Simple & Powerful
 
@@ -154,6 +154,22 @@ pres.writeFile();
 ```
 
 That's really all there is to it!
+
+### Slide Transitions
+
+```typescript
+let slide = pres.addSlide();
+slide.addText("Quarterly Review", { x: 0.8, y: 0.8, w: 4, h: 0.5 });
+slide.transition = {
+	type: "split",
+	orientation: "vertical",
+	direction: "in",
+	speed: "slow",
+	duration: 1200,
+};
+```
+
+`duration` uses an Office 2010 fallback-safe OOXML extension. Clients that do not support it still receive the same transition without the duration attribute.
 
 ## 💥 HTML-to-PowerPoint Magic
 

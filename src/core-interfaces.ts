@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * PptxGenJS Interfaces
  */
@@ -89,6 +88,65 @@ export type Color = HexColor | ThemeColor
 export type Margin = number | [number, number, number, number]
 export type HAlign = 'left' | 'center' | 'right' | 'justify'
 export type VAlign = 'top' | 'middle' | 'bottom'
+export type SlideTransitionSpeed = 'slow' | 'med' | 'fast'
+export type SlideTransitionOrientation = 'horizontal' | 'vertical'
+export type SlideTransitionSideDirection = 'left' | 'up' | 'right' | 'down'
+export type SlideTransitionCornerDirection = 'leftUp' | 'rightUp' | 'leftDown' | 'rightDown'
+export type SlideTransitionEightDirection = SlideTransitionSideDirection | SlideTransitionCornerDirection
+export type SlideTransitionInOutDirection = 'in' | 'out'
+
+export interface SlideTransitionBaseProps {
+	advanceOnClick?: boolean
+	advanceTime?: number
+	duration?: number
+	speed?: SlideTransitionSpeed
+}
+export interface SlideTransitionEmptyProps extends SlideTransitionBaseProps {
+	type: 'circle' | 'diamond' | 'dissolve' | 'newsflash' | 'plus' | 'random' | 'wedge'
+}
+export interface SlideTransitionOrientationProps extends SlideTransitionBaseProps {
+	orientation?: SlideTransitionOrientation
+	type: 'blinds' | 'checker' | 'comb' | 'randomBar'
+}
+export interface SlideTransitionEightDirectionProps extends SlideTransitionBaseProps {
+	direction?: SlideTransitionEightDirection
+	type: 'cover' | 'pull'
+}
+export interface SlideTransitionOptionalBlackProps extends SlideTransitionBaseProps {
+	throughBlack?: boolean
+	type: 'cut' | 'fade'
+}
+export interface SlideTransitionSideDirectionProps extends SlideTransitionBaseProps {
+	direction?: SlideTransitionSideDirection
+	type: 'push' | 'wipe'
+}
+export interface SlideTransitionSplitProps extends SlideTransitionBaseProps {
+	direction?: SlideTransitionInOutDirection
+	orientation?: SlideTransitionOrientation
+	type: 'split'
+}
+export interface SlideTransitionStripsProps extends SlideTransitionBaseProps {
+	direction?: SlideTransitionCornerDirection
+	type: 'strips'
+}
+export interface SlideTransitionWheelProps extends SlideTransitionBaseProps {
+	spokes?: 1 | 2 | 3 | 4 | 8
+	type: 'wheel'
+}
+export interface SlideTransitionZoomProps extends SlideTransitionBaseProps {
+	direction?: SlideTransitionInOutDirection
+	type: 'zoom'
+}
+export type SlideTransitionProps =
+	| SlideTransitionEightDirectionProps
+	| SlideTransitionEmptyProps
+	| SlideTransitionOptionalBlackProps
+	| SlideTransitionOrientationProps
+	| SlideTransitionSideDirectionProps
+	| SlideTransitionSplitProps
+	| SlideTransitionStripsProps
+	| SlideTransitionWheelProps
+	| SlideTransitionZoomProps
 
 // used by charts, shape, text
 export interface BorderProps {
@@ -1841,6 +1899,13 @@ export interface PresSlide extends SlideBaseProps {
 	 * Slide number options
 	 */
 	slideNumber?: SlideNumberProps
+	/**
+	 * Slide transition options
+	 * @example { type: 'fade' }
+	 * @example { type: 'push', direction: 'left', speed: 'slow' }
+	 * @example { type: 'split', orientation: 'vertical', direction: 'in', duration: 1200, advanceTime: 3000 }
+	 */
+	transition?: SlideTransitionProps
 }
 export interface AddSlideProps {
 	masterName?: string // TODO: 20200528: rename to "masterTitle" (createMaster uses `title` so lets be consistent)

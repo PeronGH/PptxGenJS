@@ -42,6 +42,7 @@ import {
 	inch2Emu,
 	valToPts,
 } from './gen-utils'
+import { genXmlSlideTransition } from './gen-transition'
 
 const ImageSizingXml = {
 	cover: function (imgSize: { w: number, h: number }, boxDim: { w: number, h: number, x: number, y: number }) {
@@ -1563,7 +1564,7 @@ export function makeXmlSlide (slide: PresSlide): string {
 		'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"' +
 		`${slide?.hidden ? ' show="0"' : ''}>` +
 		`${slideObjectToXml(slide)}` +
-		'<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>'
+		`<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${genXmlSlideTransition(slide.transition)}</p:sld>`
 	)
 }
 
