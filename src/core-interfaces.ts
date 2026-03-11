@@ -102,7 +102,8 @@ export type ThemeColor =
   | "accent5"
   | "accent6";
 export type Color = HexColor | ThemeColor;
-export type Margin = number | [number, number, number, number];
+export type MarginTuple = [number, number, number, number];
+export type Margin = number | MarginTuple;
 export type HAlign = "left" | "center" | "right" | "justify";
 export type VAlign = "top" | "middle" | "bottom";
 export type SlideTransitionSpeed = "slow" | "med" | "fast";
@@ -205,6 +206,18 @@ export interface BorderProps {
    */
   pt?: number;
 }
+export type BorderTuple = [
+  BorderProps,
+  BorderProps,
+  BorderProps,
+  BorderProps,
+];
+export type PartialBorderTuple = [
+  BorderProps?,
+  BorderProps?,
+  BorderProps?,
+  BorderProps?,
+];
 // used by: image, object, text,
 export interface HyperlinkProps {
   _rId: number;
@@ -960,7 +973,7 @@ export interface TableCellProps extends TextBaseProps {
   /**
    * Cell border
    */
-  border?: BorderProps | [BorderProps, BorderProps, BorderProps, BorderProps];
+  border?: BorderProps | PartialBorderTuple;
   /**
    * Cell colspan
    */
@@ -1036,7 +1049,7 @@ export interface TableProps
    * - single value is applied to all 4 sides
    * - array of values in TRBL order for individual sides
    */
-  border?: BorderProps | [BorderProps, BorderProps, BorderProps, BorderProps];
+  border?: BorderProps | PartialBorderTuple;
   /**
    * Width of table columns (inches)
    * - single value is applied to every column equally based upon `w`
@@ -1935,29 +1948,35 @@ export interface SlideMasterProps {
   background?: BackgroundProps;
   margin?: Margin;
   slideNumber?: SlideNumberProps;
-  objects?: Array<
-    | { chart: IChartOpts }
-    | { image: ImageProps }
-    | { line: ShapeProps }
-    | { rect: ShapeProps }
-    | { text: TextProps }
-    | {
-      placeholder: {
-        options: PlaceholderProps;
-        /**
-         * Text to be shown in placeholder (shown until user focuses textbox or adds text)
-         * - Leave blank to have powerpoint show default phrase (ex: "Click to add title")
-         */
-        text?: string;
-      };
-    }
-  >;
+  objects?: SlideMasterObject[];
 
   /**
    * @deprecated v3.3.0 - use `background`
    */
   bkgd?: string | BackgroundProps;
 }
+export type SlideMasterObject =
+  | {
+    chart: {
+      type: CHART_NAME | IChartMulti[];
+      data: IOptsChartData[];
+      opts?: IChartOpts;
+    };
+  }
+  | { image: ImageProps }
+  | { line: ShapeProps }
+  | { rect: ShapeProps }
+  | { text: TextProps }
+  | {
+    placeholder: {
+      options: PlaceholderProps;
+      /**
+       * Text to be shown in placeholder (shown until user focuses textbox or adds text)
+       * - Leave blank to have powerpoint show default phrase (ex: "Click to add title")
+       */
+      text?: string;
+    };
+  };
 export interface ObjectOptions
   extends
     ImageProps,

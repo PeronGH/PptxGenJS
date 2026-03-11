@@ -15,7 +15,6 @@ import {
   DEF_SLIDE_MARGIN_IN,
   EMU,
   IMG_PLAYBTN,
-  MASTER_OBJECTS,
   PIECHART_COLORS,
   SCHEME_COLOR_NAMES,
   SHAPE_NAME,
@@ -27,6 +26,8 @@ import {
 import {
   AddSlideProps,
   BackgroundProps,
+  BorderProps,
+  BorderTuple,
   IChartMulti,
   IChartOptsLib,
   ImageProps,
@@ -40,6 +41,7 @@ import {
   ShapeLineProps,
   ShapeProps,
   SlideLayout,
+  SlideMasterObject,
   SlideMasterProps,
   TableCell,
   TableProps,
@@ -59,6 +61,36 @@ import {
 
 /** counter for included charts (used for index in their filenames) */
 let _chartCounter = 0;
+const LAYOUT_KEYS = ["x", "y", "w", "h"] as const;
+
+function isMultiLevelLabels(
+  labels: string[] | string[][],
+): labels is string[][] {
+  return Array.isArray(labels[0]);
+}
+
+function normalizeBorderTuple(
+  border?: BorderProps | [
+    BorderProps?,
+    BorderProps?,
+    BorderProps?,
+    BorderProps?,
+  ],
+): BorderTuple | undefined {
+  if (!border) return undefined;
+
+  const source = Array.isArray(border)
+    ? border
+    : [border, border, border, border];
+
+  return [0, 1, 2, 3].map((idx) => ({
+    type: source[idx]?.type || DEF_CELL_BORDER.type,
+    color: source[idx]?.color || DEF_CELL_BORDER.color,
+    pt: typeof source[idx]?.pt === "number"
+      ? source[idx].pt
+      : DEF_CELL_BORDER.pt,
+  })) as BorderTuple;
+}
 
 /**
  * Transforms a slide definition to a slide object that is then passed to the XML transformation process.
@@ -77,40 +109,40 @@ export function createSlideMaster(
   if (
     props.objects && Array.isArray(props.objects) && props.objects.length > 0
   ) {
-    props.objects.forEach((object, idx) => {
-      const key = Object.keys(object)[0];
+    props.objects.forEach((object: SlideMasterObject, idx) => {
       const tgt = target as PresSlide;
-      if (MASTER_OBJECTS[key] && key === "chart") {
+      if ("chart" in object) {
         addChartDefinition(
           tgt,
-          object[key].type,
-          object[key].data,
-          object[key].opts,
+          object.chart.type,
+          object.chart.data,
+          object.chart.opts || {},
         );
-      } else if (MASTER_OBJECTS[key] && key === "image") {
-        addImageDefinition(tgt, object[key]);
-      } else if (MASTER_OBJECTS[key] && key === "line") {
-        addShapeDefinition(tgt, SHAPE_TYPE.LINE, object[key]);
-      } else if (MASTER_OBJECTS[key] && key === "rect") {
-        addShapeDefinition(tgt, SHAPE_TYPE.RECTANGLE, object[key]);
-      } else if (MASTER_OBJECTS[key] && key === "text") {
+      } else if ("image" in object) {
+        addImageDefinition(tgt, object.image);
+      } else if ("line" in object) {
+        addShapeDefinition(tgt, SHAPE_TYPE.LINE, object.line);
+      } else if ("rect" in object) {
+        addShapeDefinition(tgt, SHAPE_TYPE.RECTANGLE, object.rect);
+      } else if ("text" in object) {
         addTextDefinition(
           tgt,
-          [{ text: object[key].text }],
-          object[key].options,
+          [{ text: object.text.text }],
+          object.text.options || {},
           false,
         );
-      } else if (MASTER_OBJECTS[key] && key === "placeholder") {
+      } else if ("placeholder" in object) {
         // TODO: 20180820: Check for existing `name`?
-        object[key].options.placeholder = object[key].options.name;
-        delete object[key].options.name; // remap name for earier handling internally
-        object[key].options._placeholderType = object[key].options.type;
-        delete object[key].options.type; // remap name for earier handling internally
-        object[key].options._placeholderIdx = 100 + idx;
+        const placeholderOptions: ObjectOptions = {
+          ...object.placeholder.options,
+          placeholder: object.placeholder.options.name,
+          _placeholderType: object.placeholder.options.type,
+          _placeholderIdx: 100 + idx,
+        };
         addTextDefinition(
           tgt,
-          [{ text: object[key].text }],
-          object[key].options,
+          [{ text: object.placeholder.text }],
+          placeholderOptions,
           true,
         );
         // TODO: ISSUE#599 - only text is suported now (add more below)
@@ -192,17 +224,13 @@ export function addChartDefinition(
   }
 
   const chartId = ++_chartCounter;
-  const resultObject = {
-    _type: null,
-    text: null,
-    options: null,
-    chartRid: null,
+  const resultObject: Pick<ISlideObject, "_type" | "chartRid" | "options"> = {
+    _type: SLIDE_OBJECT_TYPES.chart,
   };
   // DESIGN: `type` can an object (ex: `pptx.charts.DOUGHNUT`) or an array of chart objects
   // EX: addChartDefinition([ { type:pptx.charts.BAR, data:{name:'', labels:[], values[]} }, {<etc>} ])
   // Multi-Type Charts
-  let tmpOpt = null;
-  let tmpData = [];
+  let tmpData: IOptsChartData[] = [];
   if (Array.isArray(type)) {
     // For multi-type charts there needs to be data for each type,
     // as well as a single data source for non-series operations.
@@ -211,22 +239,18 @@ export function addChartDefinition(
     type.forEach((obj) => {
       tmpData = tmpData.concat(obj.data);
     });
-    tmpOpt = data || opt;
   } else {
     tmpData = data;
-    tmpOpt = opt;
   }
   tmpData.forEach((item, i) => {
     item._dataIndex = i;
 
     // Converts the 'labels' array from string[] to string[][] (or the respective primitive type), if needed
-    if (item.labels !== undefined && !Array.isArray(item.labels[0])) {
-      item.labels = [item.labels as string[]];
+    if (item.labels !== undefined && !isMultiLevelLabels(item.labels)) {
+      item.labels = [item.labels];
     }
   });
-  const options: IChartOptsLib = tmpOpt && typeof tmpOpt === "object"
-    ? tmpOpt
-    : {};
+  const options: IChartOptsLib = opt && typeof opt === "object" ? opt : {};
 
   // STEP 1: TODO: check for reqd fields, correct type, etc
   // `type` exists in CHART_TYPE
@@ -367,9 +391,10 @@ export function addChartDefinition(
       : valToPts(0.75);
   // `layout` allows the override of PPT defaults to maximize space
   if (options.layout) {
-    ["x", "y", "w", "h"].forEach((key) => {
+    LAYOUT_KEYS.forEach((key) => {
       const val = options.layout[key];
-      if (isNaN(Number(val)) || val < 0 || val > 1) {
+      const numericVal = Number(val);
+      if (isNaN(numericVal) || numericVal < 0 || numericVal > 1) {
         console.warn("Warning: chart.layout." + key + " can only be 0-1");
         delete options.layout[key]; // remove invalid value so that default will be used
       }
@@ -579,8 +604,14 @@ export function addChartDefinition(
   }
 
   // STEP 4: Set props
-  resultObject._type = "chart";
-  resultObject.options = options;
+  resultObject.options = {
+    altText: options.altText,
+    h: options.h,
+    objectName: options.objectName,
+    w: options.w,
+    x: options.x,
+    y: options.y,
+  };
   resultObject.chartRid = getNewRelId(target);
 
   // STEP 5: Add this chart to this Slide Rels (rId/rels count spans all slides! Count all images to get next rId)
@@ -1096,42 +1127,8 @@ export function addTableDefinition(
           [{ type: "none" }, { type: "none" }, { type: "none" }, {
             type: "none",
           }];
-        const cellBorder = newCell.options.border;
-
-        // CASE 1: border interface is: BorderOptions | [BorderOptions, BorderOptions, BorderOptions, BorderOptions]
-        if (!Array.isArray(cellBorder) && typeof cellBorder === "object") {
-          newCell.options.border = [
-            cellBorder,
-            cellBorder,
-            cellBorder,
-            cellBorder,
-          ];
-        }
-        // Handle: [null, null, {type:'solid'}, null]
-        if (!newCell.options.border[0]) {
-          newCell.options.border[0] = { type: "none" };
-        }
-        if (!newCell.options.border[1]) {
-          newCell.options.border[1] = { type: "none" };
-        }
-        if (!newCell.options.border[2]) {
-          newCell.options.border[2] = { type: "none" };
-        }
-        if (!newCell.options.border[3]) {
-          newCell.options.border[3] = { type: "none" };
-        }
-
-        // set complete BorderOptions for all sides
-        const arrSides = [0, 1, 2, 3];
-        arrSides.forEach((idx) => {
-          newCell.options.border[idx] = {
-            type: newCell.options.border[idx].type || DEF_CELL_BORDER.type,
-            color: newCell.options.border[idx].color || DEF_CELL_BORDER.color,
-            pt: typeof newCell.options.border[idx].pt === "number"
-              ? newCell.options.border[idx].pt
-              : DEF_CELL_BORDER.pt,
-          };
-        });
+        const cellBorder = normalizeBorderTuple(newCell.options.border);
+        if (cellBorder) newCell.options.border = cellBorder;
 
         // LAST:
         newRow.push(newCell);
@@ -1178,15 +1175,7 @@ export function addTableDefinition(
     );
     opt.border = null;
   } else if (Array.isArray(opt.border)) {
-    [0, 1, 2, 3].forEach((idx) => {
-      opt.border[idx] = opt.border[idx]
-        ? {
-          type: opt.border[idx].type || DEF_CELL_BORDER.type,
-          color: opt.border[idx].color || DEF_CELL_BORDER.color,
-          pt: opt.border[idx].pt || DEF_CELL_BORDER.pt,
-        }
-        : { type: "none" };
-    });
+    opt.border = normalizeBorderTuple(opt.border);
   }
 
   opt.autoPage = typeof opt.autoPage === "boolean" ? opt.autoPage : false;
@@ -1649,28 +1638,46 @@ function createHyperlinkRels(
     | ISlideObject
     | TextProps
     | TextProps[]
+    | TableCell[]
     | TableCell[][],
   options?: TextPropsOptions[],
 ): void {
-  let textObjs = [];
+  let textObjs: Array<ISlideObject | TextProps | TableCell[]> = [];
 
   // Only text objects can have hyperlinks, bail when text param is plain text
   if (typeof text === "string" || typeof text === "number") return;
   // IMPORTANT: "else if" Array.isArray must come before typeof===object! Otherwise, code will exhaust recursion!
-  else if (Array.isArray(text)) textObjs = text;
-  else if (typeof text === "object") textObjs = [text];
+  else if (Array.isArray(text)) {
+    if (text.every((item) => Array.isArray(item))) {
+      textObjs = text as TableCell[][];
+    } else if (
+      text.every((item) => typeof item === "object" && "_type" in item)
+    ) {
+      textObjs = [text as TableCell[]];
+    } else {
+      textObjs = text as TextProps[];
+    }
+  } else if (typeof text === "object") textObjs = [text];
 
-  textObjs.forEach((text: TextProps, idx: number) => {
+  textObjs.forEach((text, idx: number) => {
     // IMPORTANT: `options` are lost due to recursion/copy!
-    if (options && options[idx] && options[idx].hyperlink) {
+    if (
+      !Array.isArray(text) &&
+      options &&
+      options[idx] &&
+      options[idx].hyperlink
+    ) {
       text.options = { ...text.options, ...options[idx] };
     }
 
     // NOTE: `text` can be an array of other `text` objects (table cell word-level formatting), continue parsing using recursion
     if (Array.isArray(text)) {
-      const cellOpts = [];
+      const cellOpts: TextPropsOptions[] = [];
       text.forEach((tablecell) => {
-        if (tablecell.options && !tablecell.text.options) {
+        if (
+          !Array.isArray(tablecell) && tablecell.options &&
+          !Array.isArray(tablecell.text)
+        ) {
           cellOpts.push(tablecell.options);
         }
       });
