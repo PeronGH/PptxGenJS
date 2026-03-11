@@ -1,0 +1,39 @@
+{
+  "imports": {
+    "jszip": "npm:jszip@3.10.1",
+    "@std/assert": "jsr:@std/assert@^1.0.13"
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "deno.window"
+    ],
+    "noImplicitAny": false,
+    "strict": true,
+    "strictNullChecks": false
+  },
+  "fmt": {
+    "include": [
+      "mod.ts",
+      "examples/",
+      "src/",
+      "test/"
+    ]
+  },
+  "lint": {
+    "include": [
+      "mod.ts",
+      "examples/",
+      "src/",
+      "test/"
+    ]
+  },
+  "tasks": {
+    "check": "deno check mod.ts test/pptxgen.test.ts test/remote-media.integration.ts",
+    "example": "deno run --allow-read --allow-write examples/basic.ts",
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "test": "deno test --allow-read --allow-write test/pptxgen.test.ts",
+    "test:integration": "deno test --allow-read --allow-write --allow-net test/remote-media.integration.ts"
+  }
+}
