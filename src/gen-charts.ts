@@ -59,11 +59,15 @@ const SER_TIME_UNIT_KEYS = [
 type ChartTimeUnitKey =
   | typeof CAT_TIME_UNIT_KEYS[number]
   | typeof SER_TIME_UNIT_KEYS[number];
-type ResolvedChartSeries = IOptsChartData & {
-  labels: string[][];
-  values: number[];
-  sizes: number[];
-};
+type ResolvedChartSeries =
+  & Omit<IOptsChartData, "_dataIndex" | "labels" | "name" | "sizes" | "values">
+  & {
+    _dataIndex: number;
+    name: string;
+    labels: string[][];
+    values: number[];
+    sizes: number[];
+  };
 
 function normalizeTimeUnitOption<K extends ChartTimeUnitKey>(
   opts: IChartOptsLib,
@@ -85,9 +89,11 @@ function normalizeTimeUnitOption<K extends ChartTimeUnitKey>(
 function resolveSeries(
   series: IOptsChartData | undefined,
   fallbackName: string,
+  dataIndex = series?._dataIndex ?? 0,
 ): ResolvedChartSeries {
   return {
     ...series,
+    _dataIndex: dataIndex,
     name: series?.name || fallbackName,
     labels: series?.labels || [[]],
     values: series?.values || [],
@@ -112,12 +118,21 @@ export async function createExcelWorksheet(
   chartObject: ISlideRelChart,
   zip: JSZip,
 ): Promise<string> {
-  const data = chartObject.data;
+  const data = chartObject.data.map((series, idx) =>
+    resolveSeries(series, idx === 0 ? "X-Axis" : `Series ${idx + 1}`, idx)
+  );
+  const firstSeries = data[0];
+  if (!firstSeries) {
+    throw new Error("Chart data requires at least one series.");
+  }
+  const firstLabels = firstSeries.labels;
+  const firstLabelRow = firstLabels[0] || [];
+  const firstValues = firstSeries.values;
 
   return await new Promise((resolve, reject) => {
     const zipExcel = new JSZip();
     const intBubbleCols = (data.length - 1) * 2 + 1; // 1 for "X-Values", then 2 for every Y-Axis
-    const IS_MULTI_CAT_AXES = data[0]?.labels?.length > 1;
+    const IS_MULTI_CAT_AXES = firstLabels.length > 1;
 
     // A: Add folders
     zipExcel.folder("_rels");
@@ -233,7 +248,7 @@ export async function createExcelWorksheet(
           `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${data.length}" uniqueCount="${data.length}">`;
       } else if (IS_MULTI_CAT_AXES) {
         let totCount = data.length;
-        data[0].labels.forEach(
+        firstLabels.forEach(
           (
             arrLabel,
           ) => (totCount += arrLabel.filter((label) =>
@@ -246,11 +261,11 @@ export async function createExcelWorksheet(
       } else {
         // series names + all labels of one series + number of label groups (data.labels.length) of one series (i.e. how many times the blank string is used)
         const totCount = data.length +
-          data[0].labels.length * data[0].labels[0].length +
-          data[0].labels.length;
+          firstLabels.length * firstLabelRow.length +
+          firstLabels.length;
         // series names + labels of one series + blank string (same for all label groups)
         const unqCount = data.length +
-          data[0].labels.length * data[0].labels[0].length + 1;
+          firstLabels.length * firstLabelRow.length + 1;
         // start `sst`
         strSharedStrings +=
           `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${totCount}" uniqueCount="${unqCount}">`;
@@ -291,7 +306,7 @@ export async function createExcelWorksheet(
         chartObject.opts._type !== CHART_TYPE.SCATTER
       ) {
         // Use forEach backwards & check for '' to support multi-cat axes
-        data[0].labels
+        firstLabels
           .slice()
           .reverse()
           .forEach((labelsGroup) => {
@@ -341,7 +356,7 @@ export async function createExcelWorksheet(
         strTableXml +=
           `<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:${
             getExcelColName(data.length)
-          }${data[0].values.length + 1}" totalsRowShown="0">`;
+          }${firstValues.length + 1}" totalsRowShown="0">`;
         strTableXml += `<tableColumns count="${data.length}">`;
         data.forEach((_obj, idx) => {
           strTableXml += `<tableColumn id="${idx + 1}" name="${
@@ -351,19 +366,19 @@ export async function createExcelWorksheet(
       } else {
         strTableXml +=
           `<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:${
-            getExcelColName(data.length + data[0].labels.length)
-          }${data[0].labels[0].length + 1}'" totalsRowShown="0">`;
+            getExcelColName(data.length + firstLabels.length)
+          }${firstLabelRow.length + 1}'" totalsRowShown="0">`;
         strTableXml += `<tableColumns count="${
-          data.length + data[0].labels.length
+          data.length + firstLabels.length
         }">`;
-        data[0].labels.forEach((_labelsGroup, idx) => {
+        firstLabels.forEach((_labelsGroup, idx) => {
           strTableXml += `<tableColumn id="${idx + 1}" name="Column${
             idx + 1
           }"/>`;
         });
         data.forEach((obj, idx) => {
           strTableXml += `<tableColumn id="${
-            idx + data[0].labels.length + 1
+            idx + firstLabels.length + 1
           }" name="${encodeXmlEntities(obj.name)}"/>`;
         });
       }
@@ -386,15 +401,15 @@ export async function createExcelWorksheet(
         chartObject.opts._type === CHART_TYPE.BUBBLE3D
       ) {
         strSheetXml += `<dimension ref="A1:${getExcelColName(intBubbleCols)}${
-          data[0].values.length + 1
+          firstValues.length + 1
         }"/>`;
       } else if (chartObject.opts._type === CHART_TYPE.SCATTER) {
         strSheetXml += `<dimension ref="A1:${getExcelColName(data.length)}${
-          data[0].values.length + 1
+          firstValues.length + 1
         }"/>`;
       } else {
         strSheetXml += `<dimension ref="A1:${getExcelColName(data.length + 1)}${
-          data[0].values.length + 1
+          firstValues.length + 1
         }"/>`;
       }
 
@@ -433,21 +448,22 @@ export async function createExcelWorksheet(
         strSheetXml += "</row>";
 
         // B: Add row for each X-Axis value (Y-Axis* value is optional)
-        data[0].values.forEach((val, idx) => {
+        firstValues.forEach((val, idx) => {
           // Leading col is reserved for the 'X-Axis' value, so hard-code it, then loop over col values
           strSheetXml += `<row r="${idx + 2}" spans="1:${intBubbleCols}">`;
           strSheetXml += `<c r="A${idx + 2}"><v>${val}</v></c>`;
           // Add Y-Axis 1->N (idy=0 = Xaxis)
           let idxColLtr = 2;
           for (let idy = 1; idy < data.length; idy++) {
+            const series = data[idy]!;
             // y-value
             strSheetXml += `<c r="${getExcelColName(idxColLtr)}${idx + 2}"><v>${
-              data[idy].values[idx] || ""
+              series.values[idx] || ""
             }</v></c>`;
             idxColLtr++;
             // y-size
             strSheetXml += `<c r="${getExcelColName(idxColLtr)}${idx + 2}"><v>${
-              data[idy].sizes[idx] || ""
+              series.sizes[idx] || ""
             }</v></c>`;
             idxColLtr++;
           }
@@ -485,15 +501,16 @@ export async function createExcelWorksheet(
         strSheetXml += "</row>";
 
         // B: Add row for each X-Axis value (Y-Axis* value is optional)
-        data[0].values.forEach((val, idx) => {
+        firstValues.forEach((val, idx) => {
           // Leading col is reserved for the 'X-Axis' value, so hard-code it, then loop over col values
           strSheetXml += `<row r="${idx + 2}" spans="1:${data.length}">`;
           strSheetXml += `<c r="A${idx + 2}"><v>${val}</v></c>`;
           // Add Y-Axis 1->N
           for (let idy = 1; idy < data.length; idy++) {
+            const series = data[idy]!;
             strSheetXml += `<c r="${getExcelColName(idy + 1)}${idx + 2}"><v>${
-              data[idy].values[idx] || data[idy].values[idx] === 0
-                ? data[idy].values[idx]
+              series.values[idx] || series.values[idx] === 0
+                ? series.values[idx]
                 : ""
             }</v></c>`;
           }
@@ -524,57 +541,58 @@ export async function createExcelWorksheet(
         if (!IS_MULTI_CAT_AXES) {
           // A: Create header row first
           strSheetXml += `<row r="1" spans="1:${
-            data.length + data[0].labels.length
+            data.length + firstLabels.length
           }">`;
-          data[0].labels.forEach((_labelsGroup, idx) => {
+          firstLabels.forEach((_labelsGroup, idx) => {
             strSheetXml += `<c r="${
               getExcelColName(idx + 1)
             }1" t="s"><v>0</v></c>`;
           });
           for (let idx = 0; idx < data.length; idx++) {
             strSheetXml += `<c r="${
-              getExcelColName(idx + 1 + data[0].labels.length)
+              getExcelColName(idx + 1 + firstLabels.length)
             }1" t="s"><v>${idx + 1}</v></c>`; // NOTE: use `t="s"` for label cols!
           }
           strSheetXml += "</row>";
 
           // B: Add data row(s) for each category
-          data[0].labels[0].forEach((_cat, idx) => {
+          firstLabelRow.forEach((_cat, idx) => {
             strSheetXml += `<row r="${idx + 2}" spans="1:${
-              data.length + data[0].labels.length
+              data.length + firstLabels.length
             }">`;
             // Leading cols are reserved for the label groups
-            for (let idx2 = data[0].labels.length - 1; idx2 >= 0; idx2--) {
+            for (let idx2 = firstLabels.length - 1; idx2 >= 0; idx2--) {
               strSheetXml += `<c r="${
-                getExcelColName(data[0].labels.length - idx2)
+                getExcelColName(firstLabels.length - idx2)
               }${idx + 2}" t="s">`;
               strSheetXml += `<v>${data.length + idx + 1}</v>`;
               strSheetXml += "</c>";
             }
             for (let idy = 0; idy < data.length; idy++) {
+              const series = data[idy]!;
               strSheetXml += `<c r="${
-                getExcelColName(data[0].labels.length + idy + 1)
-              }${idx + 2}"><v>${data[idy].values[idx] || ""}</v></c>`;
+                getExcelColName(firstLabels.length + idy + 1)
+              }${idx + 2}"><v>${series.values[idx] || ""}</v></c>`;
             }
             strSheetXml += "</row>";
           });
         } else {
           // A: create header row
           strSheetXml += `<row r="1" spans="1:${
-            data.length + data[0].labels.length
+            data.length + firstLabels.length
           }">`;
-          for (let idx = 0; idx < data[0].labels.length; idx++) {
+          for (let idx = 0; idx < firstLabels.length; idx++) {
             strSheetXml += `<c r="${
               getExcelColName(idx + 1)
             }1" t="s"><v>0</v></c>`;
           }
           for (
-            let idx = data[0].labels.length - 1;
-            idx < data.length + data[0].labels.length - 1;
+            let idx = firstLabels.length - 1;
+            idx < data.length + firstLabels.length - 1;
             idx++
           ) {
             strSheetXml += `<c r="${
-              getExcelColName(idx + data[0].labels.length)
+              getExcelColName(idx + firstLabels.length)
             }1" t="s"><v>${idx}</v></c>`; // NOTE: use `t="s"` for label cols!
           }
           strSheetXml += "</row>";
@@ -640,8 +658,8 @@ export async function createExcelWorksheet(
            * ];
            */
           const TOT_SER = data.length;
-          const TOT_CAT = data[0].labels[0].length;
-          const TOT_LVL = data[0].labels.length;
+          const TOT_CAT = firstLabelRow.length;
+          const TOT_LVL = firstLabels.length;
           // Iterate across labels/cats as these are the <row>'s
           for (let idx = 0; idx < TOT_CAT; idx++) {
             // A: start row
@@ -652,7 +670,7 @@ export async function createExcelWorksheet(
             // WIP: FIXME:
             // B: add a col for each label/cat
             let totLabels = TOT_SER;
-            const revLabelGroups = data[0].labels.slice().reverse();
+            const revLabelGroups = firstLabels.slice().reverse();
             revLabelGroups.forEach((labelsGroup, idy) => {
               /**
                * const LABELS_REVERSED = [
@@ -677,9 +695,10 @@ export async function createExcelWorksheet(
             // WIP: FIXME:
             // C: add a col for each data value
             for (let idy = 0; idy < TOT_SER; idy++) {
+              const series = data[idy]!;
               strSheetXml += `<c r="${getExcelColName(TOT_LVL + idy + 1)}${
                 idx + 2
-              }"><v>${data[idy].values[idx] || 0}</v></c>`;
+              }"><v>${series.values[idx] || 0}</v></c>`;
             }
 
             // D: Done
@@ -754,6 +773,16 @@ export async function createExcelWorksheet(
 export function makeXmlCharts(rel: ISlideRelChart): string {
   let strXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   let usesSecondaryValAxis = false;
+  const chartType = rel.opts._type;
+  if (!chartType) {
+    throw new Error("Chart type is required.");
+  }
+  const chartArea = rel.opts.chartArea || {};
+  const plotArea = rel.opts.plotArea || {};
+  const chartAreaBorder = chartArea.border || DEF_CHART_BORDER;
+  const plotAreaBorder = plotArea.border || DEF_CHART_BORDER;
+  const defaultChartBorderPt = DEF_CHART_BORDER.pt || 1;
+  const defaultChartBorderColor = DEF_CHART_BORDER.color || "363636";
 
   // STEP 1: Create chart
   {
@@ -762,7 +791,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
       '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
     strXml += '<c:date1904 val="0"/>'; // ppt defaults to 1904 dates, excel to 1900
     strXml += `<c:roundedCorners val="${
-      rel.opts.chartArea.roundedCorners ? "1" : "0"
+      chartArea.roundedCorners ? "1" : "0"
     }"/>`;
     strXml += "<c:chart>";
 
@@ -790,7 +819,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
     /** Add 3D view tag
      * @see: https://c-rex.net/projects/samples/ooxml/e1/Part4/OOXML_P4_DOCX_perspective_topic_ID0E6BUQB.html
      */
-    if (rel.opts._type === CHART_TYPE.BAR3D) {
+    if (chartType === CHART_TYPE.BAR3D) {
       strXml +=
         `<c:view3D><c:rotX val="${rel.opts.v3DRotX}"/><c:rotY val="${rel.opts.v3DRotY}"/><c:rAngAx val="${
           !rel.opts.v3DRAngAx ? 0 : 1
@@ -817,8 +846,8 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
   }
 
   // A: Create Chart XML -----------------------------------------------------------
-  if (Array.isArray(rel.opts._type)) {
-    rel.opts._type.forEach((type) => {
+  if (Array.isArray(chartType)) {
+    chartType.forEach((type) => {
       // TODO: FIXME: theres `options` on chart rels??
       const options = { ...rel.opts, ...type.options };
       // let options: IChartOptsLib = { type: type.type, }
@@ -828,7 +857,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
       const catAxisId = options.secondaryCatAxis
         ? AXIS_ID_CATEGORY_SECONDARY
         : AXIS_ID_CATEGORY_PRIMARY;
-      usesSecondaryValAxis = usesSecondaryValAxis || options.secondaryValAxis;
+      usesSecondaryValAxis = usesSecondaryValAxis || !!options.secondaryValAxis;
       strXml += makeChartType(
         type.type,
         type.data,
@@ -840,7 +869,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
     });
   } else {
     strXml += makeChartType(
-      rel.opts._type,
+      chartType,
       rel.data,
       rel.opts,
       AXIS_ID_VALUE_PRIMARY,
@@ -851,7 +880,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
 
   // B: Axes -----------------------------------------------------------
   if (
-    rel.opts._type !== CHART_TYPE.PIE && rel.opts._type !== CHART_TYPE.DOUGHNUT
+    chartType !== CHART_TYPE.PIE && chartType !== CHART_TYPE.DOUGHNUT
   ) {
     // Param check
     if (
@@ -898,7 +927,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
       strXml += makeValAxis(rel.opts, AXIS_ID_VALUE_PRIMARY);
 
       // Add series axis for 3D bar
-      if (rel.opts._type === CHART_TYPE.BAR3D) {
+      if (chartType === CHART_TYPE.BAR3D) {
         strXml += makeSerAxis(
           rel.opts,
           AXIS_ID_SERIES_PRIMARY,
@@ -965,14 +994,16 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
     strXml += "  <c:spPr>";
 
     // OPTION: Fill
-    strXml += rel.opts.plotArea.fill?.color
-      ? genXmlColorSelection(rel.opts.plotArea.fill)
+    strXml += plotArea.fill?.color
+      ? genXmlColorSelection(plotArea.fill)
       : "<a:noFill/>";
 
     // OPTION: Border
-    strXml += rel.opts.plotArea.border
-      ? `<a:ln w="${valToPts(rel.opts.plotArea.border.pt)}" cap="flat">${
-        genXmlColorSelection(rel.opts.plotArea.border.color)
+    strXml += plotArea.border
+      ? `<a:ln w="${
+        valToPts(plotAreaBorder.pt || defaultChartBorderPt)
+      }" cap="flat">${
+        genXmlColorSelection(plotAreaBorder.color || defaultChartBorderColor)
       }</a:ln>`
       : "<a:ln><a:noFill/></a:ln>";
 
@@ -1023,7 +1054,7 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
 
   strXml += '  <c:plotVisOnly val="1"/>';
   strXml += '  <c:dispBlanksAs val="' + rel.opts.displayBlanksAs + '"/>';
-  if (rel.opts._type === CHART_TYPE.SCATTER) {
+  if (chartType === CHART_TYPE.SCATTER) {
     strXml += '<c:showDLblsOverMax val="1"/>';
   }
 
@@ -1031,12 +1062,14 @@ export function makeXmlCharts(rel: ISlideRelChart): string {
 
   // D: CHARTSPACE SHAPE PROPS
   strXml += "<c:spPr>";
-  strXml += rel.opts.chartArea.fill?.color
-    ? genXmlColorSelection(rel.opts.chartArea.fill)
+  strXml += chartArea.fill?.color
+    ? genXmlColorSelection(chartArea.fill)
     : "<a:noFill/>";
-  strXml += rel.opts.chartArea.border
-    ? `<a:ln w="${valToPts(rel.opts.chartArea.border.pt)}" cap="flat">${
-      genXmlColorSelection(rel.opts.chartArea.border.color)
+  strXml += chartArea.border
+    ? `<a:ln w="${
+      valToPts(chartAreaBorder.pt || defaultChartBorderPt)
+    }" cap="flat">${
+      genXmlColorSelection(chartAreaBorder.color || defaultChartBorderColor)
     }</a:ln>`
     : "<a:ln><a:noFill/></a:ln>";
   strXml += "  <a:effectLst/>";
@@ -1074,11 +1107,24 @@ function makeChartType(
 ): string {
   // NOTE: "Chart Range" (as shown in "select Chart Area dialog") is calculated.
   // ....: Ensure each X/Y Axis/Col has same row height (esp. applicable to XY Scatter where X can often be larger than Y's)
+  const seriesData = data.map((series, idx) =>
+    resolveSeries(series, `Series ${idx + 1}`, idx)
+  );
+  const firstSeries = seriesData[0];
+  if (!firstSeries) {
+    throw new Error("Chart data requires at least one series.");
+  }
   let colorIndex = -1; // Maintain the color index by region
   let idxColLtr = 1;
   let optsChartData: ResolvedChartSeries | undefined;
   let strXml = "";
-  const firstSeries = resolveSeries(data[0], "Series 1");
+  const dataBorder = opts.dataBorder || DEF_CHART_BORDER;
+  const dataLabelFormatCode = opts.dataLabelFormatCode
+    ? encodeXmlEntities(opts.dataLabelFormatCode)
+    : "General";
+  const chartColors = opts.chartColors || BARCHART_COLORS;
+  const defaultChartBorderPt = DEF_CHART_BORDER.pt || 1;
+  const defaultChartBorderColor = DEF_CHART_BORDER.color || "363636";
 
   switch (chartType) {
     case CHART_TYPE.AREA:
@@ -1139,7 +1185,7 @@ function makeChartType(
 				 }
 				]
              */
-      data.forEach((obj) => {
+      seriesData.forEach((obj) => {
         colorIndex++;
         strXml += "<c:ser>";
         strXml +=
@@ -1184,9 +1230,9 @@ function makeChartType(
           }
         } else if (opts.dataBorder) {
           strXml += `<a:ln w="${
-            valToPts(opts.dataBorder.pt || DEF_CHART_BORDER.pt)
+            valToPts(dataBorder.pt || defaultChartBorderPt)
           }" cap="${createLineCap(opts.lineCap)}"><a:solidFill>${
-            createColorElement(opts.dataBorder.color || DEF_CHART_BORDER.color)
+            createColorElement(dataBorder.color || defaultChartBorderColor)
           }</a:solidFill><a:prstDash val="solid"/><a:round/></a:ln>`;
         }
 
@@ -1199,9 +1245,8 @@ function makeChartType(
         // NOTE: [20190117] Adding these to RADAR chart causes unrecoverable corruption!
         if (chartType !== CHART_TYPE.RADAR) {
           strXml += "<c:dLbls>";
-          strXml += `<c:numFmt formatCode="${
-            encodeXmlEntities(opts.dataLabelFormatCode) || "General"
-          }" sourceLinked="0"/>`;
+          strXml +=
+            `<c:numFmt formatCode="${dataLabelFormatCode}" sourceLinked="0"/>`;
           if (opts.dataLabelBkgrdColors) {
             strXml += `<c:spPr><a:solidFill>${
               createColorElement(seriesColor)
@@ -1263,7 +1308,7 @@ function makeChartType(
         // NOTE: `<c:dPt>` created with various colors will change PPT legend by design so each dataPt/color is an legend item!
         if (
           (chartType === CHART_TYPE.BAR || chartType === CHART_TYPE.BAR3D) &&
-          data.length === 1 &&
+          seriesData.length === 1 &&
           ((opts.chartColors && opts.chartColors !== BARCHART_COLORS &&
             opts.chartColors.length > 1) || (opts.invertedColors?.length))
         ) {
@@ -1380,9 +1425,8 @@ function makeChartType(
       // 3: "Data Labels"
       {
         strXml += "  <c:dLbls>";
-        strXml += `    <c:numFmt formatCode="${
-          encodeXmlEntities(opts.dataLabelFormatCode) || "General"
-        }" sourceLinked="0"/>`;
+        strXml +=
+          `    <c:numFmt formatCode="${dataLabelFormatCode}" sourceLinked="0"/>`;
         strXml += "    <c:txPr>";
         strXml += "      <a:bodyPr/>";
         strXml += "      <a:lstStyle/>";
@@ -1460,8 +1504,7 @@ function makeChartType(
 
       // 2: Series: (One for each Y-Axis)
       colorIndex = -1;
-      data.filter((_obj, idx) => idx > 0).forEach((series, idx) => {
-        const obj = resolveSeries(series, `Y-Value ${idx + 1}`);
+      seriesData.filter((_obj, idx) => idx > 0).forEach((obj, idx) => {
         colorIndex++;
         strXml += "<c:ser>";
         strXml += `  <c:idx val="${idx}"/>`;
@@ -1693,7 +1736,7 @@ function makeChartType(
 
         // Color bar chart bars various colors
         // Allow users with a single data set to pass their own array of colors (check for this using != ours)
-        if (data.length === 1 && opts.chartColors !== BARCHART_COLORS) {
+        if (seriesData.length === 1 && opts.chartColors !== BARCHART_COLORS) {
           // Series Data Point colors
           obj.values.forEach((value, index) => {
             const arrColors = value < 0
@@ -1725,12 +1768,12 @@ function makeChartType(
           strXml += "<c:xVal>";
           strXml += "  <c:numRef>";
           strXml += `    <c:f>Sheet1!$A$2:$A$${
-            data[0].values.length + 1
+            firstSeries.values.length + 1
           }</c:f>`;
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
-          strXml += `      <c:ptCount val="${data[0].values.length}"/>`;
-          data[0].values.forEach((value, idx) => {
+          strXml += `      <c:ptCount val="${firstSeries.values.length}"/>`;
+          firstSeries.values.forEach((value, idx) => {
             strXml += `<c:pt idx="${idx}"><c:v>${
               value || value === 0 ? value : ""
             }</c:v></c:pt>`;
@@ -1744,12 +1787,12 @@ function makeChartType(
           strXml += "  <c:numRef>";
           strXml += `    <c:f>Sheet1!$${getExcelColName(idx + 2)}$2:$${
             getExcelColName(idx + 2)
-          }$${data[0].values.length + 1}</c:f>`;
+          }$${firstSeries.values.length + 1}</c:f>`;
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
           // NOTE: Use pt count and iterate over data[0] (X-Axis) as user can have more values than data (eg: timeline where only first few months are populated)
-          strXml += `      <c:ptCount val="${data[0].values.length}"/>`;
-          data[0].values.forEach((_value, idx) => {
+          strXml += `      <c:ptCount val="${firstSeries.values.length}"/>`;
+          firstSeries.values.forEach((_value, idx) => {
             strXml += `<c:pt idx="${idx}"><c:v>${
               obj.values[idx] || obj.values[idx] === 0 ? obj.values[idx] : ""
             }</c:v></c:pt>`;
@@ -1769,9 +1812,8 @@ function makeChartType(
       // 3: Data Labels
       {
         strXml += "  <c:dLbls>";
-        strXml += `    <c:numFmt formatCode="${
-          encodeXmlEntities(opts.dataLabelFormatCode) || "General"
-        }" sourceLinked="0"/>`;
+        strXml +=
+          `    <c:numFmt formatCode="${dataLabelFormatCode}" sourceLinked="0"/>`;
         strXml += "    <c:txPr>";
         strXml += "      <a:bodyPr/>";
         strXml += "      <a:lstStyle/>";
@@ -1827,8 +1869,7 @@ function makeChartType(
 
       // 2: Series: (One for each Y-Axis)
       colorIndex = -1;
-      data.filter((_obj, idx) => idx > 0).forEach((series, idx) => {
-        const obj = resolveSeries(series, `Y-Values ${idx + 1}`);
+      seriesData.filter((_obj, idx) => idx > 0).forEach((obj, idx) => {
         colorIndex++;
         strXml += "<c:ser>";
         strXml += `  <c:idx val="${idx}"/>`;
@@ -1869,10 +1910,10 @@ function makeChartType(
             strXml += "<a:ln><a:noFill/></a:ln>";
           } else if (opts.dataBorder) {
             strXml += `<a:ln w="${
-              valToPts(opts.dataBorder.pt || DEF_CHART_BORDER.pt)
+              valToPts(dataBorder.pt || defaultChartBorderPt)
             }" cap="flat"><a:solidFill>${
               createColorElement(
-                opts.dataBorder.color || DEF_CHART_BORDER.color,
+                dataBorder.color || defaultChartBorderColor,
               )
             }</a:solidFill><a:prstDash val="solid"/><a:round/></a:ln>`;
           } else {
@@ -1901,12 +1942,12 @@ function makeChartType(
           strXml += "<c:xVal>";
           strXml += "  <c:numRef>";
           strXml += `    <c:f>Sheet1!$A$2:$A$${
-            data[0].values.length + 1
+            firstSeries.values.length + 1
           }</c:f>`;
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
-          strXml += `      <c:ptCount val="${data[0].values.length}"/>`;
-          data[0].values.forEach((value, idx) => {
+          strXml += `      <c:ptCount val="${firstSeries.values.length}"/>`;
+          firstSeries.values.forEach((value, idx) => {
             strXml += `<c:pt idx="${idx}"><c:v>${
               value || value === 0 ? value : ""
             }</c:v></c:pt>`;
@@ -1920,13 +1961,13 @@ function makeChartType(
           strXml += "  <c:numRef>";
           strXml += `<c:f>Sheet1!$${getExcelColName(idxColLtr + 1)}$2:$${
             getExcelColName(idxColLtr + 1)
-          }$${data[0].values.length + 1}</c:f>`;
+          }$${firstSeries.values.length + 1}</c:f>`;
           idxColLtr++;
           strXml += "    <c:numCache>";
           strXml += "      <c:formatCode>General</c:formatCode>";
           // NOTE: Use pt count and iterate over data[0] (X-Axis) as user can have more values than data (eg: timeline where only first few months are populated)
-          strXml += `      <c:ptCount val="${data[0].values.length}"/>`;
-          data[0].values.forEach((_value, idx) => {
+          strXml += `      <c:ptCount val="${firstSeries.values.length}"/>`;
+          firstSeries.values.forEach((_value, idx) => {
             strXml += `<c:pt idx="${idx}"><c:v>${
               obj.values[idx] || obj.values[idx] === 0 ? obj.values[idx] : ""
             }</c:v></c:pt>`;
@@ -1962,9 +2003,8 @@ function makeChartType(
       // 3: Data Labels
       {
         strXml += "<c:dLbls>";
-        strXml += `<c:numFmt formatCode="${
-          encodeXmlEntities(opts.dataLabelFormatCode) || "General"
-        }" sourceLinked="0"/>`;
+        strXml +=
+          `<c:numFmt formatCode="${dataLabelFormatCode}" sourceLinked="0"/>`;
         strXml += "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>";
         strXml += `<a:defRPr b="${opts.dataLabelFontBold ? 1 : 0}" i="${
           opts.dataLabelFontItalic ? 1 : 0
@@ -2061,19 +2101,19 @@ function makeChartType(
         strXml += " <c:spPr>";
         strXml += `<a:solidFill>${
           createColorElement(
-            opts.chartColors[
-              idx + 1 > opts.chartColors.length
-                ? Math.floor(Math.random() * opts.chartColors.length)
+            chartColors[
+              idx + 1 > chartColors.length
+                ? Math.floor(Math.random() * chartColors.length)
                 : idx
             ],
           )
         }</a:solidFill>`;
         if (opts.dataBorder) {
           strXml += `<a:ln w="${
-            valToPts(opts.dataBorder.pt)
+            valToPts(dataBorder.pt || defaultChartBorderPt)
           }" cap="flat"><a:solidFill>${
             createColorElement(
-              opts.dataBorder.color,
+              dataBorder.color || defaultChartBorderColor,
             )
           }</a:solidFill><a:prstDash val="solid"/><a:round/></a:ln>`;
         }
@@ -2087,9 +2127,8 @@ function makeChartType(
       optsChartData.labels[0].forEach((_label, idx) => {
         strXml += "<c:dLbl>";
         strXml += ` <c:idx val="${idx}"/>`;
-        strXml += `  <c:numFmt formatCode="${
-          encodeXmlEntities(opts.dataLabelFormatCode) || "General"
-        }" sourceLinked="0"/>`;
+        strXml +=
+          `  <c:numFmt formatCode="${dataLabelFormatCode}" sourceLinked="0"/>`;
         strXml += "  <c:spPr/><c:txPr>";
         strXml += "   <a:bodyPr/><a:lstStyle/>";
         strXml += "   <a:p><a:pPr>";
@@ -2121,9 +2160,8 @@ function makeChartType(
         strXml += '    <c:showBubbleSize val="0"/>';
         strXml += "  </c:dLbl>";
       });
-      strXml += ` <c:numFmt formatCode="${
-        encodeXmlEntities(opts.dataLabelFormatCode) || "General"
-      }" sourceLinked="0"/>`;
+      strXml +=
+        ` <c:numFmt formatCode="${dataLabelFormatCode}" sourceLinked="0"/>`;
       strXml += "    <c:txPr>";
       strXml += "      <a:bodyPr/>";
       strXml += "      <a:lstStyle/>";
@@ -2222,6 +2260,10 @@ function makeCatAxis(
   axisId: string,
   valAxisId: string,
 ): string {
+  const catGridLine = opts.catGridLine || DEF_CHART_GRIDLINE;
+  const catLabelFormatCode = opts.catLabelFormatCode
+    ? encodeXmlEntities(opts.catLabelFormatCode)
+    : "General";
   let strXml = "";
 
   // Build cat axis tag
@@ -2248,8 +2290,8 @@ function makeCatAxis(
   strXml += "</c:scaling>";
   strXml += '  <c:delete val="' + (opts.catAxisHidden ? "1" : "0") + '"/>';
   strXml += '  <c:axPos val="' + (opts.barDir === "col" ? "b" : "l") + '"/>';
-  strXml += opts.catGridLine.style !== "none"
-    ? createGridLineElement(opts.catGridLine)
+  strXml += catGridLine.style !== "none"
+    ? createGridLineElement(catGridLine)
     : "";
   // '<c:title>' comes between '</c:majorGridlines>' and '<c:numFmt>'
   if (opts.showCatAxisTitle) {
@@ -2271,9 +2313,8 @@ function makeCatAxis(
       : "General") +
       '" sourceLinked="1"/>';
   } else {
-    strXml += '  <c:numFmt formatCode="' +
-      (encodeXmlEntities(opts.catLabelFormatCode) || "General") +
-      '" sourceLinked="1"/>';
+    strXml +=
+      `  <c:numFmt formatCode="${catLabelFormatCode}" sourceLinked="1"/>`;
   }
   if (opts._type === CHART_TYPE.SCATTER) {
     strXml += '  <c:majorTickMark val="none"/>';
@@ -2293,7 +2334,7 @@ function makeCatAxis(
     opts.catAxisLineSize ? valToPts(opts.catAxisLineSize) : ONEPT
   }" cap="flat">`;
   strXml += !opts.catAxisLineShow ? "<a:noFill/>" : "<a:solidFill>" +
-    createColorElement(opts.catAxisLineColor || DEF_CHART_GRIDLINE.color) +
+    createColorElement(opts.catAxisLineColor || catGridLine.color || "888888") +
     "</a:solidFill>";
   strXml += '      <a:prstDash val="' + (opts.catAxisLineStyle || "solid") +
     '"/>';
@@ -2388,6 +2429,10 @@ function makeCatAxis(
  * @return {string} XML
  */
 function makeValAxis(opts: IChartOptsLib, valAxisId: string): string {
+  const valGridLine = opts.valGridLine || DEF_CHART_GRIDLINE;
+  const valAxisLabelFormatCode = opts.valAxisLabelFormatCode
+    ? encodeXmlEntities(opts.valAxisLabelFormatCode)
+    : "General";
   let axisPos = valAxisId === AXIS_ID_VALUE_PRIMARY
     ? (opts.barDir === "col" ? "l" : "b")
     : opts.barDir !== "col"
@@ -2417,8 +2462,8 @@ function makeValAxis(opts: IChartOptsLib, valAxisId: string): string {
   strXml += "  </c:scaling>";
   strXml += `  <c:delete val="${opts.valAxisHidden ? 1 : 0}"/>`;
   strXml += '  <c:axPos val="' + axisPos + '"/>';
-  if (opts.valGridLine.style !== "none") {
-    strXml += createGridLineElement(opts.valGridLine);
+  if (valGridLine.style !== "none") {
+    strXml += createGridLineElement(valGridLine);
   }
   // '<c:title>' comes between '</c:majorGridlines>' and '<c:numFmt>'
   if (opts.showValAxisTitle) {
@@ -2430,11 +2475,8 @@ function makeValAxis(opts: IChartOptsLib, valAxisId: string): string {
       title: opts.valAxisTitle || "Axis Title",
     });
   }
-  strXml += `<c:numFmt formatCode="${
-    opts.valAxisLabelFormatCode
-      ? encodeXmlEntities(opts.valAxisLabelFormatCode)
-      : "General"
-  }" sourceLinked="0"/>`;
+  strXml +=
+    `<c:numFmt formatCode="${valAxisLabelFormatCode}" sourceLinked="0"/>`;
   if (opts._type === CHART_TYPE.SCATTER) {
     strXml += '  <c:majorTickMark val="none"/>';
     strXml += '  <c:minorTickMark val="none"/>';
@@ -2453,7 +2495,7 @@ function makeValAxis(opts: IChartOptsLib, valAxisId: string): string {
     opts.valAxisLineSize ? valToPts(opts.valAxisLineSize) : ONEPT
   }" cap="flat">`;
   strXml += !opts.valAxisLineShow ? "<a:noFill/>" : "<a:solidFill>" +
-    createColorElement(opts.valAxisLineColor || DEF_CHART_GRIDLINE.color) +
+    createColorElement(opts.valAxisLineColor || valGridLine.color || "888888") +
     "</a:solidFill>";
   strXml += '     <a:prstDash val="' + (opts.valAxisLineStyle || "solid") +
     '"/>';
@@ -2529,6 +2571,10 @@ function makeSerAxis(
   axisId: string,
   valAxisId: string,
 ): string {
+  const serGridLine = opts.serGridLine || DEF_CHART_GRIDLINE;
+  const serLabelFormatCode = opts.serLabelFormatCode
+    ? encodeXmlEntities(opts.serLabelFormatCode)
+    : "General";
   let strXml = "";
 
   // Build ser axis tag
@@ -2539,8 +2585,8 @@ function makeSerAxis(
     '"/></c:scaling>';
   strXml += '  <c:delete val="' + (opts.serAxisHidden ? "1" : "0") + '"/>';
   strXml += '  <c:axPos val="' + (opts.barDir === "col" ? "b" : "l") + '"/>';
-  strXml += opts.serGridLine.style !== "none"
-    ? createGridLineElement(opts.serGridLine)
+  strXml += serGridLine.style !== "none"
+    ? createGridLineElement(serGridLine)
     : "";
   // '<c:title>' comes between '</c:majorGridlines>' and '<c:numFmt>'
   if (opts.showSerAxisTitle) {
@@ -2552,9 +2598,7 @@ function makeSerAxis(
       title: opts.serAxisTitle || "Axis Title",
     });
   }
-  strXml += `  <c:numFmt formatCode="${
-    encodeXmlEntities(opts.serLabelFormatCode) || "General"
-  }" sourceLinked="0"/>`;
+  strXml += `  <c:numFmt formatCode="${serLabelFormatCode}" sourceLinked="0"/>`;
   strXml += '  <c:majorTickMark val="out"/>';
   strXml += '  <c:minorTickMark val="none"/>';
   strXml += `  <c:tickLblPos val="${
@@ -2565,7 +2609,7 @@ function makeSerAxis(
   strXml += !opts.serAxisLineShow
     ? "<a:noFill/>"
     : `<a:solidFill>${
-      createColorElement(opts.serAxisLineColor || DEF_CHART_GRIDLINE.color)
+      createColorElement(opts.serAxisLineColor || serGridLine.color || "888888")
     }</a:solidFill>`;
   strXml += '      <a:prstDash val="solid"/>';
   strXml += "      <a:round/>";
@@ -2637,6 +2681,9 @@ function genXmlTitle(
   chartX?: number,
   chartY?: number,
 ): string {
+  const safeChartX = chartX || 0;
+  const safeChartY = chartY || 0;
+  const title = opts.title || "";
   const align = opts.titleAlign === "left" || opts.titleAlign === "right"
     ? `<a:pPr algn="${opts.titleAlign.substring(0, 1)}">`
     : "<a:pPr>";
@@ -2654,8 +2701,8 @@ function genXmlTitle(
     typeof opts.titlePos.y === "number"
   ) {
     // NOTE: manualLayout x/y vals are *relative to entire slide*
-    const totalX = opts.titlePos.x + chartX;
-    const totalY = opts.titlePos.y + chartY;
+    const totalX = opts.titlePos.x + safeChartX;
+    const totalY = opts.titlePos.y + safeChartY;
     let valX = totalX === 0 ? 0 : (totalX * (totalX / 5)) / 10;
     if (valX >= 1) valX = valX / 10;
     if (valX >= 0.1) valX = valX / 10;
@@ -2687,7 +2734,7 @@ function genXmlTitle(
   }</a:solidFill>
               <a:latin typeface="${opts.fontFace || "Arial"}"/>
             </a:rPr>
-            <a:t>${encodeXmlEntities(opts.title) || ""}</a:t>
+            <a:t>${encodeXmlEntities(title) || ""}</a:t>
           </a:r>
         </a:p>
         </c:rich>
@@ -2743,13 +2790,13 @@ function createShadowElement(
   }
 
   let strXml = "<a:effectLst>";
-  const opts = { ...defaults, ...options };
+  const opts = { ...defaults, ...options } as ShadowProps;
   const type = opts.type || "outer";
-  const blur = valToPts(opts.blur);
-  const offset = valToPts(opts.offset);
-  const angle = Math.round(opts.angle * 60000);
-  const color = opts.color;
-  const opacity = Math.round(opts.opacity * 100000);
+  const blur = valToPts(opts.blur || 0);
+  const offset = valToPts(opts.offset || 0);
+  const angle = Math.round((opts.angle || 0) * 60000);
+  const color = opts.color || DEF_FONT_COLOR;
+  const opacity = Math.round((opts.opacity || 0) * 100000);
   const rotShape = opts.rotateWithShape ? 1 : 0;
 
   strXml +=
@@ -2768,15 +2815,17 @@ function createShadowElement(
  * @return {string} XML
  */
 function createGridLineElement(glOpts: OptsChartGridLine): string {
+  const size = glOpts.size ?? DEF_CHART_GRIDLINE.size ?? 1;
+  const cap = glOpts.cap || DEF_CHART_GRIDLINE.cap || "flat";
+  const color = glOpts.color || DEF_CHART_GRIDLINE.color || "888888";
+  const style = glOpts.style || DEF_CHART_GRIDLINE.style || "solid";
   let strXml = "<c:majorGridlines>";
   strXml += " <c:spPr>";
-  strXml += `  <a:ln w="${
-    valToPts(glOpts.size || DEF_CHART_GRIDLINE.size)
-  }" cap="${createLineCap(glOpts.cap || DEF_CHART_GRIDLINE.cap)}">`;
+  strXml += `  <a:ln w="${valToPts(size)}" cap="${createLineCap(cap)}">`;
   strXml += '  <a:solidFill><a:srgbClr val="' +
-    (glOpts.color || DEF_CHART_GRIDLINE.color) + '"/></a:solidFill>'; // should accept scheme colors as implemented in [Pull #135]
+    color + '"/></a:solidFill>'; // should accept scheme colors as implemented in [Pull #135]
   strXml += '   <a:prstDash val="' +
-    (glOpts.style || DEF_CHART_GRIDLINE.style) + '"/><a:round/>';
+    style + '"/><a:round/>';
   strXml += "  </a:ln>";
   strXml += " </c:spPr>";
   strXml += "</c:majorGridlines>";
